@@ -24,8 +24,8 @@ __global__ void threads_copy_kernel(
         }
     } else {
         auto in_vec = reinterpret_cast<floatn*>(const_cast<T*>(&in[index]));
-        auto out_vec = reinterpret_cast<floatn*>(out + index);
-        out_vec[0] = in_vec[0];
+        auto out_vec = reinterpret_cast<floatn*>(&out[index]);
+        *out_vec = *in_vec;
     }
 }
 
@@ -51,8 +51,8 @@ float threads_copy(const T *in, T *out, size_t n) {
     return ms;
 }
 
-int main() {
-    const size_t n = 1024*1024*1024;
+int test_thcopyf4() {
+    const size_t n = 1024*1024*1024 + 2; // 4GB
     auto in_cpu = new float[n];
     auto out_cpu = new float[n];
     for (int i = 0; i < n; i++)
@@ -85,4 +85,11 @@ int main() {
     delete in_cpu;
     delete out_cpu;
     return 0;
+}
+
+int main()
+{
+    std::cout << "4GB f4 thread copy test ...\n";
+    for(int i=0;i<3;i++)
+        test_thcopyf4();
 }
