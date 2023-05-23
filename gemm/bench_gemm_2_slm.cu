@@ -20,18 +20,35 @@ __global__ void matmul_kernel(
     const float *B, int Bw,
     float *C,
     float alpha, float beta) {
-    auto x = blockIdx.x * blockDim.x + threadIdx.x;
-    auto y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int BLOCKSIZE = 32;
+    auto tx = threadIdx.x % BLOCKSIZE;
+    auto ty = threadIdx.x / BLOCKSIZE;
+    auto x = blockIdx.x * BLOCKSIZE + tx;
+    auto y = blockIdx.y * BLOCKSIZE + ty;
+
+    auto block_y_begin = (blockIdx.y * BLOCKSIZE)*Aw;
+    auto block_y_end = block_y_begin + Aw;
+    auto block_y_step = BLOCKSIZE;
+    auto block_x_begin = blockIdx.x * BLOCKSIZE;
+    auto block_x_step = BLOCKSIZE * Bw;
+
     float tmp = 0.0;
-    for (int i = 0; i < Aw; ++i) {
-        tmp += A[y * Aw + i] * B[i * Bw + x];
+    for (int a_bg = block_y_begin, b_bg = block_x_begin; a_bg < block_y_end; a_bg += block_y_step, b_bg += block_x_step) {
+        __shared__ float As[32 * 32];
+        __shared__ float Bs[32 * 32];
+        As[threadIdx.x] = A[a_bg + ty * Aw + tx];
+        Bs[threadIdx.x] = B[b_bg + ty * Bw + tx];
+        __syncthreads();
+        for (int k = 0; k < BLOCKSIZE; ++k)
+            tmp += As[ty * BLOCKSIZE + k] * Bs[k * BLOCKSIZE + tx];
+        __syncthreads();
     }
     C[y * Bw + x] = alpha * tmp + beta * C[y * Bw + x];
 }
 
 float matmul_cu(const float *a, int ah, int aw, const float *b, int bw, float *c, float alpha, float beta) {
-    dim3 threadsPerBlock(32, 32);
-    dim3 numBlocks(ah / threadsPerBlock.x, bw / threadsPerBlock.y);
+    dim3 threadsPerBlock(32 * 32);
+    dim3 numBlocks(ah / 32, bw / 32);
     
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
