@@ -4,5 +4,6 @@ This repo mainly focuses on evaluating the various capabilities of graphics card
 
 #### dashboard
 
-RTX4090: bench_bandwidth 855.245 gbps
-A100-40GB: bench_bandwidth 1288.61 gbps
+|   test\card     | RTX4090  | A100-40GB |
+| --------------- | --------- | -------- |
+| bench_bandwidth |  855.245  | 1288.61  |
