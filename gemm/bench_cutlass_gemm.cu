@@ -19,12 +19,6 @@ void matmul(const float *a, int ah, int aw, const float *b, int bw, float *c, fl
 float matmul_cu(const float *a, int ah, int aw, const float *b, int bw, float *c, float alpha, float beta) {
     using RowMajor = cutlass::layout::RowMajor;
     using CutlassGemm = cutlass::gemm::device::Gemm<float, RowMajor, float, RowMajor, float, RowMajor>;
-    
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
-
     CutlassGemm gemm_op;
     CutlassGemm::Arguments args(
         {ah, bw, aw},
@@ -34,6 +28,13 @@ float matmul_cu(const float *a, int ah, int aw, const float *b, int bw, float *c
         {c, bw},
         {alpha, beta}
     );
+    
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
+    
     gemm_op(args);
     
     cudaEventRecord(stop);
@@ -73,7 +74,7 @@ int main() {
     auto timems = matmul_cu(a, ah, aw, b, bw, c, alpha, beta);
     float total_GBytes = (ah * aw + aw * bw + ah * bw + ah * bw) * sizeof(float) / 1024.0 / 1024 / 1024;
     std::cout << total_GBytes / (timems/1000.0) << " GBPS\n";
-    std::cout << ah * aw * bw / (timems/1000.0) /1000000000000 << " TFLOPS\n";
+    std::cout << 2 * ah * aw * (double)bw / (timems/1000.0) * 1e-12 << " TFLOPS\n";
 
     auto out_c = new float[ah * bw];
     cudaMemcpy(out_c, c, ah * bw * sizeof(float), cudaMemcpyDeviceToHost);
