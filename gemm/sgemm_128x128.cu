@@ -38,6 +38,9 @@ __global__ void matmul_kernel(
     auto lid_mod_LDG_A_X_CT = lid % LDG_A_X_CT;
     auto lid_mod_LDG_B_X_CT = lid % LDG_B_X_CT;
 
+    float4 a_reg[LDG_REG_A_COUNT][LDG_REG_B_COUNT];
+    float4 b_reg[LDG_REG_A_COUNT][LDG_REG_B_COUNT];
+
     float tmp[TM * TN] = {0.0};
 
     int write_stage_idx = 1; //ping pong switch
@@ -69,17 +72,27 @@ __global__ void matmul_kernel(
         }
         __syncthreads();
 
-        if (lid == 0) {
-        auto As_ = reinterpret_cast<float*>(As);
-        auto Bs_ = reinterpret_cast<float*>(Bs);
+#pragma unroll
         for(int k=0; k<BK; k++) {
-            for(int m=0; m<BM; m++) {
-                for(int n=0; n<BN; n++) {
-                    C[(blockIdx.y * BM + m) * Bw + (blockIdx.x * BN + n)] += As_[k * BM + m] * Bs_[k * BN + n];
+#pragma unroll
+            for(int ia=0; ia<LDG_REG_A_COUNT; ia++) {
+#pragma unroll
+                for(int ib=0; ib<LDG_REG_B_COUNT; ib++) {
+                    a_reg[ia][ib] = As[read_stage_idx][k * BM + ia * ];
                 }
             }
         }
-        }
+        // if (lid == 0) {
+        // auto As_ = reinterpret_cast<float*>(As);
+        // auto Bs_ = reinterpret_cast<float*>(Bs);
+        // for(int k=0; k<BK; k++) {
+        //     for(int m=0; m<BM; m++) {
+        //         for(int n=0; n<BN; n++) {
+        //             C[(blockIdx.y * BM + m) * Bw + (blockIdx.x * BN + n)] += As_[k * BM + m] * Bs_[k * BN + n];
+        //         }
+        //     }
+        // }
+        // }
 
         __syncthreads();
    
