@@ -2,6 +2,7 @@
 #include <device_launch_parameters.h>
 #include <iostream>
 #include <random>
+#include "cutlass/gemm/device/gemm.h"
 using namespace std;
 
 void matmul(const float *a, int ah, int aw, const float *b, int bw, float *c, float alpha, float beta) {
@@ -15,66 +16,25 @@ void matmul(const float *a, int ah, int aw, const float *b, int bw, float *c, fl
     }
 }
 
-__global__ void matmul_kernel(
-    const float *A, int Ah, int Aw,
-    const float *B, int Bw,
-    float *C,
-    float alpha, float beta) {
-    const int BM = 64;
-    const int BK = 16;
-    auto lid = threadIdx.x;
-    auto tx = lid % 32;
-    auto ty = lid / 32;
-    // auto x = blockIdx.x * BLOCKSIZE + tx;
-    // auto y = blockIdx.y * BLOCKSIZE + ty;
-
-    auto block_y_begin = (blockIdx.y * BM)*Aw;
-    auto block_y_end = block_y_begin + Aw;
-    auto block_y_step = BK;
-    auto block_x_begin = blockIdx.x * BM;
-    auto block_x_step = BK * Bw;
-
-    auto innerAy = lid / BK;
-    auto innerAx = lid % BK;
-    auto innerBy = lid / BM;
-    auto innerBx = lid % BM;
-
-    float tmp[4] = {0.0};
-    for (int a_bg = block_y_begin, b_bg = block_x_begin; a_bg < block_y_end; a_bg += block_y_step, b_bg += block_x_step) {
-        __shared__ float As[BM * BK];
-        __shared__ float Bs[BK * BM];
-        As[innerAy * BK + innerAx] = A[a_bg + innerAy * Aw + innerAx];
-        Bs[innerBy * BM + innerBx] = B[b_bg + innerBy * Bw + innerBx];
-        __syncthreads();
-
-        for (int m=0; m<2; m++) {
-            for(int n=0;n<2;n++) {
-                for (int k = 0; k < BK; ++k) {
-                    tmp[m*2+n] += As[(ty * 2 + m) * BK + k] * Bs[k * BM + tx * 2 + n];
-                }
-            }
-        }
-        __syncthreads();
-    }
-    for (int m=0; m<2; m++) {
-        for(int n=0;n<2;n++) {
-            auto x = blockIdx.x * 64 + tx * 2 + n;
-            auto y = blockIdx.y * 64 + ty * 2 + m;
-            C[y * Bw + x] = alpha * tmp[m*2+n] + beta * C[y * Bw + x];
-        }
-    }
-}
-
 float matmul_cu(const float *a, int ah, int aw, const float *b, int bw, float *c, float alpha, float beta) {
-    dim3 threadsPerBlock(32 * 32);
-    dim3 numBlocks(ah / 64, bw / 64);
+    using RowMajor = cutlass::layout::RowMajor;
+    using CutlassGemm = cutlass::gemm::device::Gemm<float, RowMajor, float, RowMajor, float, RowMajor>;
     
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
 
-    matmul_kernel<<<numBlocks, threadsPerBlock>>>(a, ah, aw, b, bw, c, alpha, beta);
+    CutlassGemm gemm_op;
+    CutlassGemm::Arguments args(
+        {ah, bw, aw},
+        {a, aw},
+        {b, bw},
+        {c, bw},
+        {c, bw},
+        {alpha, beta}
+    );
+    gemm_op(args);
     
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
@@ -112,7 +72,8 @@ int main() {
     matmul(ref_a, ah, aw, ref_b, bw, ref_c, alpha, beta);
     auto timems = matmul_cu(a, ah, aw, b, bw, c, alpha, beta);
     float total_GBytes = (ah * aw + aw * bw + ah * bw + ah * bw) * sizeof(float) / 1024.0 / 1024 / 1024;
-    std::cout << total_GBytes / (timems/1000.0) << " gbps\n";
+    std::cout << total_GBytes / (timems/1000.0) << " GBPS\n";
+    std::cout << ah * aw * bw / (timems/1000.0) /1000000000000 << " TFLOPS\n";
 
     auto out_c = new float[ah * bw];
     cudaMemcpy(out_c, c, ah * bw * sizeof(float), cudaMemcpyDeviceToHost);

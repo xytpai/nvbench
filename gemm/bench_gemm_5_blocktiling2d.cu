@@ -20,13 +20,12 @@ __global__ void matmul_kernel(
     const float *B, int Bw,
     float *C,
     float alpha, float beta) {
-    const int BM = 64;
-    const int BK = 16;
-    auto lid = threadIdx.x;
-    auto tx = lid % 32;
-    auto ty = lid / 32;
-    // auto x = blockIdx.x * BLOCKSIZE + tx;
-    // auto y = blockIdx.y * BLOCKSIZE + ty;
+    constexpr int BM = 64;
+    constexpr int BK = 16;
+    constexpr int TM = 2;
+
+    auto tx = threadIdx.x % 32;
+    auto ty = threadIdx.x / 32;
 
     auto block_y_begin = (blockIdx.y * BM)*Aw;
     auto block_y_end = block_y_begin + Aw;
@@ -34,33 +33,41 @@ __global__ void matmul_kernel(
     auto block_x_begin = blockIdx.x * BM;
     auto block_x_step = BK * Bw;
 
-    auto innerAy = lid / BK;
-    auto innerAx = lid % BK;
-    auto innerBy = lid / BM;
-    auto innerBx = lid % BM;
+    auto innerAy = threadIdx.x % BM;
+    auto innerAx = threadIdx.x / BM;
+    auto innerBy = threadIdx.x / BM;
+    auto innerBx = threadIdx.x % BM;
 
-    float tmp[4] = {0.0};
+    float tmp[TM * TM] = {0.0};
+    float AsTmp[TM];
+    float BsTmp[TM];
+
     for (int a_bg = block_y_begin, b_bg = block_x_begin; a_bg < block_y_end; a_bg += block_y_step, b_bg += block_x_step) {
-        __shared__ float As[BM * BK];
+        __shared__ float As[BK * BM];
         __shared__ float Bs[BK * BM];
-        As[innerAy * BK + innerAx] = A[a_bg + innerAy * Aw + innerAx];
+        As[innerAx * BM + innerAy] = A[a_bg + innerAy * Aw + innerAx];
         Bs[innerBy * BM + innerBx] = B[b_bg + innerBy * Bw + innerBx];
         __syncthreads();
 
-        for (int m=0; m<2; m++) {
-            for(int n=0;n<2;n++) {
-                for (int k = 0; k < BK; ++k) {
-                    tmp[m*2+n] += As[(ty * 2 + m) * BK + k] * Bs[k * BM + tx * 2 + n];
+        for (int k = 0; k < BK; ++k) {
+            for(int ii=0;ii<TM;ii++)
+                AsTmp[ii] = As[(ty) * BM + k * TM + ii];
+            for(int ii=0;ii<TM;ii++)
+                BsTmp[ii] = Bs[k * BM + tx * TM + ii];
+
+            for (int m=0; m<TM; m++) {
+                for(int n=0;n<TM;n++) {
+                    tmp[m*TM+n] += AsTmp[m] * BsTmp[n];
                 }
             }
         }
         __syncthreads();
     }
-    for (int m=0; m<2; m++) {
-        for(int n=0;n<2;n++) {
-            auto x = blockIdx.x * 64 + tx * 2 + n;
-            auto y = blockIdx.y * 64 + ty * 2 + m;
-            C[y * Bw + x] = alpha * tmp[m*2+n] + beta * C[y * Bw + x];
+    for (int m=0; m<TM; m++) {
+        for(int n=0;n<TM;n++) {
+            auto x = blockIdx.x * BM + tx * TM + n;
+            auto y = blockIdx.y * BM + ty * TM + m;
+            C[y * Bw + x] = alpha * tmp[m*TM+n] + beta * C[y * Bw + x];
         }
     }
 }
@@ -84,7 +91,7 @@ float matmul_cu(const float *a, int ah, int aw, const float *b, int bw, float *c
     return milliseconds;
 }
 
-int main() {
+int test_gemm() {
     const int ah = 1024;
     const int aw = 1024;
     const int bw = 1024;
@@ -134,4 +141,10 @@ int main() {
     delete ref_c;
     delete out_c;
     return 0;
+}
+
+int main()
+{
+    for(int i=0;i<3;i++)
+        test_gemm();
 }

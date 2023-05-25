@@ -13,6 +13,8 @@ for i in range(2):
             torch.profiler.ProfilerActivity.CUDA,
         ]) as p:
         c = torch.addmm(c, a, b, beta=0.5, alpha=0.5)
+    # print(p.key_averages())
+    p.export_chrome_trace('test.json')
     print(p.key_averages().table(
         sort_by="self_cuda_time_total", row_limit=-1))
 
