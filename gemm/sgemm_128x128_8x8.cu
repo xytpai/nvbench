@@ -15,6 +15,15 @@ void matmul(const float *a, int ah, int aw, const float *b, int bw, float *c, fl
     }
 }
 
+__device__ inline float4 fma_f4(const float alpha, const float4 &a, const float beta, const float4 &b) {
+    float4 res;
+    res.x = alpha * a.x + beta * b.x;
+    res.y = alpha * a.y + beta * b.y;
+    res.z = alpha * a.z + beta * b.z;
+    res.w = alpha * a.w + beta * b.w;
+    return res;
+}
+
 template<int BM=128, int BN=128, int BK=16, int TM=4, int TN=4, int SQRT_BSIZE=16>
 __global__ void matmul_kernel(
     const float *A, int Ah, int Aw,
@@ -38,18 +47,15 @@ __global__ void matmul_kernel(
     auto lid_mod_LDG_A_X_CT = lid % LDG_A_X_CT;
     auto lid_mod_LDG_B_X_CT = lid % LDG_B_X_CT;
 
-    float4 a_reg[LDG_REG_A_COUNT][LDG_REG_B_COUNT];
-    float4 b_reg[LDG_REG_A_COUNT][LDG_REG_B_COUNT];
+    float4 a_reg[LDG_REG_A_COUNT];
+    float4 b_reg[LDG_REG_B_COUNT];
+    float4 c_reg[LDG_REG_A_COUNT * LDG_REG_B_COUNT][4] = {{make_float4(0.f, 0.f, 0.f, 0.f)}};
 
-    float tmp[TM * TN] = {0.0};
-
-    int write_stage_idx = 1; //ping pong switch
-    int read_stage_idx = 0;
     for (int a_begin = block_y_begin, b_begin = block_x_begin; 
         a_begin < block_y_end; a_begin += block_y_step, b_begin += block_x_step) 
     {
-        __shared__ float4 As[2][BK * BM / 4];
-        __shared__ float4 Bs[2][BK * BN / 4];
+        __shared__ float4 As[BK * BM / 4];
+        __shared__ float4 Bs[BK * BN / 4];
 #pragma unroll
         for(int i=0; i<LDG_REG_A_COUNT; i++) {
             ldg_a_reg[i] = reinterpret_cast<float4*>(const_cast<float*>(A) + a_begin + ((blockDim.x * i + lid) / LDG_A_X_CT) * Aw)[lid_mod_LDG_A_X_CT];
@@ -63,12 +69,12 @@ __global__ void matmul_kernel(
             auto y = (blockDim.x * i + lid) / LDG_A_X_CT;
 #pragma unroll
             for(int j=0; j<4; j++) {
-                reinterpret_cast<float*>(&As[read_stage_idx][(lid_mod_LDG_A_X_CT * 4 + j) * (BM/4) + y/4].x)[y%4] = reinterpret_cast<float*>(&ldg_a_reg[i].x)[j];
+                reinterpret_cast<float*>(&As[(lid_mod_LDG_A_X_CT * 4 + j) * (BM/4) + y/4].x)[y%4] = reinterpret_cast<float*>(&ldg_a_reg[i].x)[j];
             }
         }
 #pragma unroll
         for(int i=0; i<LDG_REG_B_COUNT; i++) {
-            Bs[read_stage_idx][blockDim.x * i + lid] = ldg_b_reg[i];
+            Bs[blockDim.x * i + lid] = ldg_b_reg[i];
         }
         __syncthreads();
 
@@ -76,26 +82,47 @@ __global__ void matmul_kernel(
         for(int k=0; k<BK; k++) {
 #pragma unroll
             for(int ia=0; ia<LDG_REG_A_COUNT; ia++) {
+                a_reg[ia] = As[k * BM / 4 + lid / 16 + ia * 16];
+            }
+#pragma unroll
+            for(int ib=0; ib<LDG_REG_B_COUNT; ib++) {
+                b_reg[ib] = Bs[k * BN / 4 + lid % 16 + ib * 16];
+            }
+
+            // mma
+#pragma unroll
+            for(int ia=0; ia<LDG_REG_A_COUNT; ia++) {
 #pragma unroll
                 for(int ib=0; ib<LDG_REG_B_COUNT; ib++) {
-                    a_reg[ia][ib] = As[read_stage_idx][k * BM + ia * ];
+                    auto fa = reinterpret_cast<float*>(&a_reg[ia]);
+                    auto fb = reinterpret_cast<float*>(&b_reg[ib]);
+                    auto fc = reinterpret_cast<float*>(&c_reg[ia * LDG_REG_B_COUNT + ib]);
+                    #pragma unroll
+                    for(int m=0; m<4; m++) {
+                        #pragma unroll
+                        for(int n=0; n<4; n++) {
+                            fc[m*4+n] += fa[m] * fb[n];
+                        }
+                    }
                 }
             }
         }
-        // if (lid == 0) {
-        // auto As_ = reinterpret_cast<float*>(As);
-        // auto Bs_ = reinterpret_cast<float*>(Bs);
-        // for(int k=0; k<BK; k++) {
-        //     for(int m=0; m<BM; m++) {
-        //         for(int n=0; n<BN; n++) {
-        //             C[(blockIdx.y * BM + m) * Bw + (blockIdx.x * BN + n)] += As_[k * BM + m] * Bs_[k * BN + n];
-        //         }
-        //     }
-        // }
-        // }
-
         __syncthreads();
-   
+    }
+
+    // write back
+#pragma unroll
+    for(int ia=0; ia<LDG_REG_A_COUNT; ia++) {
+#pragma unroll
+        for(int ib=0; ib<LDG_REG_B_COUNT; ib++) {
+            auto y_base = (lid / 16 + ia * 16) * 4;
+            auto x = (lid % 16 + ib * 16) * 4;
+            for(int i=0; i<4; i++) {
+                auto y = y_base + i;
+                auto ptr = reinterpret_cast<float4*>(&C[(blockIdx.y * BM + y) * Bw + (blockIdx.x * BN + x)]);
+                *ptr = fma_f4(alpha, c_reg[ia * LDG_REG_B_COUNT + ib][i], beta, *ptr);
+            }
+        }
     }
 }
 
@@ -122,8 +149,8 @@ int main() {
     const int ah = 1024;
     const int aw = 1024;
     const int bw = 1024;
-    const float alpha = 1.0;
-    const float beta = 0.0;
+    const float alpha = 0.5;
+    const float beta = 0.5;
 
     auto ref_a = new float[ah * aw];
     auto ref_b = new float[aw * bw];
@@ -133,7 +160,7 @@ int main() {
     for (int i = 0; i < aw * bw; i++)
         ref_b[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
     for (int i = 0; i < ah * bw; i++)
-        ref_c[i] = 0; //static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+        ref_c[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
 
     float *a, *b, *c;
     cudaMalloc(&a, ah * aw * sizeof(float));

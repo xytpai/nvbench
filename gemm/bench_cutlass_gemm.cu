@@ -41,11 +41,11 @@ float matmul_cu(const float *a, int ah, int aw, const float *b, int bw, float *c
     cudaEventSynchronize(stop);
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
-    // std::cout << milliseconds << " ms" << std::endl;
+    std::cout << milliseconds << " ms" << std::endl;
     return milliseconds;
 }
 
-int main() {
+int test() {
     const int ah = 1024;
     const int aw = 1024;
     const int bw = 1024;
@@ -96,4 +96,9 @@ int main() {
     delete ref_c;
     delete out_c;
     return 0;
+}
+
+int main()
+{
+    for(int i=0; i<3; i++) test();
 }
