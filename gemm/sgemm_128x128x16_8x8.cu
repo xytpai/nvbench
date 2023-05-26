@@ -51,11 +51,15 @@ __global__ void matmul_kernel(
     float4 b_reg[LDG_REG_B_COUNT];
     float4 c_reg[LDG_REG_A_COUNT * LDG_REG_B_COUNT][4] = {{make_float4(0.f, 0.f, 0.f, 0.f)}};
 
+    __shared__ float4 As[2][BK * BM / 4];
+    __shared__ float4 Bs[2][BK * BN / 4];
+
+    int write_stage_idx = 1;
+    int read_stage_idx = 0;
+
     for (int a_begin = block_y_begin, b_begin = block_x_begin; 
         a_begin < block_y_end; a_begin += block_y_step, b_begin += block_x_step) 
     {
-        __shared__ float4 As[BK * BM / 4];
-        __shared__ float4 Bs[BK * BN / 4];
 #pragma unroll
         for(int i=0; i<LDG_REG_A_COUNT; i++) {
             ldg_a_reg[i] = reinterpret_cast<float4*>(const_cast<float*>(A) + a_begin + ((blockDim.x * i + lid) / LDG_A_X_CT) * Aw)[lid_mod_LDG_A_X_CT];
@@ -69,32 +73,34 @@ __global__ void matmul_kernel(
             auto y = (blockDim.x * i + lid) / LDG_A_X_CT;
 #pragma unroll
             for(int j=0; j<4; j++) {
-                reinterpret_cast<float*>(&As[(lid_mod_LDG_A_X_CT * 4 + j) * (BM/4) + y/4].x)[y%4] = reinterpret_cast<float*>(&ldg_a_reg[i].x)[j];
+                reinterpret_cast<float*>(&As[write_stage_idx][(lid_mod_LDG_A_X_CT * 4 + j) * (BM/4) + y/4].x)[y%4] = reinterpret_cast<float*>(&ldg_a_reg[i].x)[j];
             }
         }
 #pragma unroll
         for(int i=0; i<LDG_REG_B_COUNT; i++) {
-            Bs[blockDim.x * i + lid] = ldg_b_reg[i];
+            Bs[write_stage_idx][blockDim.x * i + lid] = ldg_b_reg[i];
         }
+        read_stage_idx ^= 1;
+        write_stage_idx ^= 1;
         __syncthreads();
 
 #pragma unroll
         for(int k=0; k<BK; k++) {
 #pragma unroll
             for(int ia=0; ia<LDG_REG_A_COUNT; ia++) {
-                a_reg[ia] = As[k * BM / 4 + lid / 16 + ia * 16];
+                a_reg[ia] = As[read_stage_idx][k * BM / 4 + lid / 16 + ia * 16];
             }
 #pragma unroll
             for(int ib=0; ib<LDG_REG_B_COUNT; ib++) {
-                b_reg[ib] = Bs[k * BN / 4 + lid % 16 + ib * 16];
+                b_reg[ib] = Bs[read_stage_idx][k * BN / 4 + lid % 16 + ib * 16];
             }
 
             // mma
 #pragma unroll
             for(int ia=0; ia<LDG_REG_A_COUNT; ia++) {
+                auto fa = reinterpret_cast<float*>(&a_reg[ia]);
 #pragma unroll
                 for(int ib=0; ib<LDG_REG_B_COUNT; ib++) {
-                    auto fa = reinterpret_cast<float*>(&a_reg[ia]);
                     auto fb = reinterpret_cast<float*>(&b_reg[ib]);
                     auto fc = reinterpret_cast<float*>(&c_reg[ia * LDG_REG_B_COUNT + ib]);
                     #pragma unroll
@@ -107,7 +113,7 @@ __global__ void matmul_kernel(
                 }
             }
         }
-        __syncthreads();
+        // __syncthreads();
     }
 
     // write back
@@ -145,10 +151,13 @@ float matmul_cu(const float *a, int ah, int aw, const float *b, int bw, float *c
     return milliseconds;
 }
 
-int main() {
+int test() {
     const int ah = 1024;
     const int aw = 1024;
     const int bw = 1024;
+    // const int ah = 2048;
+    // const int aw = 2048;
+    // const int bw = 2048;
     const float alpha = 0.5;
     const float beta = 0.5;
 
@@ -172,6 +181,7 @@ int main() {
 
     matmul(ref_a, ah, aw, ref_b, bw, ref_c, alpha, beta);
     auto timems = matmul_cu(a, ah, aw, b, bw, c, alpha, beta);
+    std::cout << timems << "\n";
     float total_GBytes = (ah * aw + aw * bw + ah * bw + ah * bw) * sizeof(float) / 1024.0 / 1024 / 1024;
     std::cout << total_GBytes / (timems/1000.0) << " gbps\n";
 
@@ -195,4 +205,8 @@ int main() {
     delete ref_c;
     delete out_c;
     return 0;
+}
+
+int main() {
+    for(int i=0; i<4; i++) test();
 }

@@ -1,21 +1,27 @@
 import torch
-import torch.nn.functional as F
-import math
+from torch.utils import benchmark
 
-a = torch.randn(1024, 1024).cuda()
-b = torch.randn(1024, 1024).cuda()
-c = torch.randn(1024, 1024).cuda()
+typ = torch.float  #数据精度
+n = 2048
+a = torch.randn(n, n).type(typ).cuda()
+b = torch.randn(n, n).type(typ).cuda()
+t = benchmark.Timer(
+      stmt='a @ b',
+      globals={'a': a, 'b': b})
+x = t.timeit(5)
+print(x)
+print(2*n**3 / x.median /1e12)
 
+
+a = torch.randn(n, n).cuda()
+b = torch.randn(n, n).cuda()
+c = torch.randn(n, n).cuda()
 for i in range(2):
     with torch.profiler.profile(
         activities=[
-            # torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA,
         ]) as p:
         c = torch.addmm(c, a, b, beta=0.5, alpha=0.5)
-    # print(p.key_averages())
-    p.export_chrome_trace('test.json')
+    # p.export_chrome_trace('test.json')
     print(p.key_averages().table(
         sort_by="self_cuda_time_total", row_limit=-1))
-
-# print(4*(1024**2) / (48/1000.0/1000.0) * 4 / 1024/1024/1024) RTX4090: 325 GBps

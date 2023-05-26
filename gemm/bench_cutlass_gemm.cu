@@ -46,9 +46,9 @@ float matmul_cu(const float *a, int ah, int aw, const float *b, int bw, float *c
 }
 
 int test() {
-    const int ah = 1024;
-    const int aw = 1024;
-    const int bw = 1024;
+    const int ah = 2048;
+    const int aw = 2048;
+    const int bw = 2048;
     const float alpha = 0.5;
     const float beta = 0.5;
 
@@ -70,7 +70,7 @@ int test() {
     cudaMemcpy(b, ref_b, aw * bw * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(c, ref_c, ah * bw * sizeof(float), cudaMemcpyHostToDevice);
 
-    matmul(ref_a, ah, aw, ref_b, bw, ref_c, alpha, beta);
+    // matmul(ref_a, ah, aw, ref_b, bw, ref_c, alpha, beta);
     auto timems = matmul_cu(a, ah, aw, b, bw, c, alpha, beta);
     float total_GBytes = (ah * aw + aw * bw + ah * bw + ah * bw) * sizeof(float) / 1024.0 / 1024 / 1024;
     std::cout << total_GBytes / (timems/1000.0) << " GBPS\n";
