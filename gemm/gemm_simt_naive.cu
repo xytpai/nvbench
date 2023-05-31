@@ -80,7 +80,7 @@ int main() {
 
     std::vector<gemm_sizes> sizes;
     sizes.push_back(gemm_sizes(1024, 1024, 1024, 0.5, 0.5));
-    sizes.push_back(gemm_sizes(1025, 111, 1026, 0.5, 0.5));
+    sizes.push_back(gemm_sizes(777, 111, 1026, 0.5, 0.5));
 
     for (auto size : sizes) {
         int m = size.m;
