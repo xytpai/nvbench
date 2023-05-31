@@ -80,7 +80,7 @@ int main() {
 
     std::vector<gemm_sizes> sizes;
     sizes.push_back(gemm_sizes(1024, 1024, 1024, 0.5, 0.5));
-    sizes.push_back(gemm_sizes(1025, 1027, 1026, 0.5, 0.5));
+    sizes.push_back(gemm_sizes(1025, 111, 1026, 0.5, 0.5));
 
     for (auto size : sizes) {
         int m = size.m;
@@ -112,6 +112,7 @@ int main() {
 
         gemm_cpu<scalar_t>(out_cpu, a_cpu, b_cpu, m, n, k, alpha, beta);
         auto timems = gemm_cuda<scalar_t>(out_cuda, a_cuda, b_cuda, m, n, k, alpha, beta);
+
         double total_gbytes = ((double)m * k + k * n + m * n + m * n) * sizeof(scalar_t) / 1000.0 / 1000 / 1000;
         std::cout << total_gbytes / (timems / 1000.0) << " gbps, ";
 
