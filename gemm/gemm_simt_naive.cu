@@ -59,6 +59,7 @@ float gemm_cuda(
     cudaEventRecord(start);
 
     gemm_cuda_kernel<scalar_t><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
+    cudaDeviceSynchronize();
 
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);

@@ -40,6 +40,7 @@ float threads_copy(const T *in, T *out, size_t n) {
     cudaEventRecord(start);
 
     threads_copy_kernel<T, vec_size><<<numBlocks, threadsPerBlock>>>(in, out, n);
+    cudaDeviceSynchronize();
 
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);

@@ -32,6 +32,7 @@ float fmad_test() {
     cudaEventRecord(start);
 
     fmad_loop_kernel<LOOP><<<numBlocks, threadsPerBlock>>>(dx);
+    cudaDeviceSynchronize();
 
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
