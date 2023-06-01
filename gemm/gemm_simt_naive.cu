@@ -31,8 +31,8 @@ __global__ void gemm_cuda_kernel(
     const int m, const int n, const int k,
     const scalar_t alpha,
     const scalar_t beta) {
-    auto mi = blockIdx.x * 32 + threadIdx.x;
-    auto ni = blockIdx.y * 32 + threadIdx.y;
+    auto mi = blockIdx.y * 32 + threadIdx.y;
+    auto ni = blockIdx.x * 32 + threadIdx.x;
     if (mi < m && ni < n) {
         float acc = 0.f;
         for (int ki = 0; ki < k; ki++) {
@@ -51,7 +51,7 @@ float gemm_cuda(
     const scalar_t alpha,
     const scalar_t beta) {
     dim3 block(32, 32);
-    dim3 grid((m + 32 - 1) / 32, (n + 32 - 1) / 32);
+    dim3 grid((n + 32 - 1) / 32, (m + 32 - 1) / 32);
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
@@ -77,6 +77,7 @@ struct gemm_sizes {
 };
 
 int main() {
+    std::cout << "gemm_simt_naive\n";
     using scalar_t = float;
 
     std::vector<gemm_sizes> sizes;
@@ -115,7 +116,7 @@ int main() {
         auto timems = gemm_cuda<scalar_t>(out_cuda, a_cuda, b_cuda, m, n, k, alpha, beta);
 
         double total_gbytes = ((double)m * k + k * n + m * n + m * n) * sizeof(scalar_t) / 1000.0 / 1000 / 1000;
-        std::cout << total_gbytes / (timems / 1000.0) << " gbps, ";
+        std::cout << timems << " ms, " << total_gbytes / (timems / 1000.0) << " gbps, ";
 
         double tflops = ((double)2 * m * n * k) / (timems / 1000) * 1e-12;
         std::cout << tflops << " tflops\n";
