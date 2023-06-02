@@ -2,9 +2,9 @@ import torch
 from torch.utils import benchmark
 
 typ = torch.float  #数据精度
-m = 8192
-n = 8192
-k = 8192
+m = 1024
+n = 1024
+k = 1024
 a = torch.randn(m, k).type(typ).cuda()
 b = torch.randn(k, n).type(typ).cuda()
 
