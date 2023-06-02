@@ -7,3 +7,5 @@ test_cu
 *.tmp
 a.out
 test.json
+*.bak
+*.ptx
