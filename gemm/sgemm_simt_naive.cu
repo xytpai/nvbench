@@ -77,7 +77,7 @@ struct gemm_sizes {
 };
 
 int main() {
-    std::cout << "gemm_simt_naive\n";
+    std::cout << "sgemm_simt_naive\n";
     using scalar_t = float;
 
     std::vector<gemm_sizes> sizes;

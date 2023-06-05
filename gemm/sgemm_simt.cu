@@ -41,7 +41,6 @@ __device__ void block_mma(scalar_t (*o)[VEC_M * VEC_N], scalar_t *a, scalar_t *b
 
 #pragma unroll
     for (int k = 0; k < BLOCK_K; k++) {
-        
 #pragma unroll
         for (int lm = 0; lm < WARP_M_LANES; lm++) {
 #pragma unroll
@@ -91,7 +90,7 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     auto wid = tid >> 5;
     auto w_tid = tid & 31;
     auto block_y = blockIdx.y;
-    auto block_x = blockIdx.x;
+    auto block_x = blockIdx.z * gridDim.x + blockIdx.x;
 
     // get slm
     extern __shared__ scalar_t slm[];
@@ -211,8 +210,10 @@ float gemm_cuda_impl(
     assert(k % 4 == 0);
     assert(n % 4 == 0);
     dim3 block(256);
-    dim3 grid((n + BLOCK_N - 1) / BLOCK_N, (m + BLOCK_M - 1) / BLOCK_M);
-    
+    int m_blocks = (m + BLOCK_M - 1) / BLOCK_M;
+    int n_blocks = (n + BLOCK_N - 1) / BLOCK_N;
+    int split_num = (n_blocks + 128 - 1) / 128;
+    dim3 grid((n_blocks + split_num - 1) / split_num, m_blocks, split_num);
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
@@ -331,7 +332,7 @@ int main() {
     sizes.push_back(gemm_sizes(2048, 2048, 2048, 0.5, 0.5));
     sizes.push_back(gemm_sizes(4096, 4096, 4096, 0.5, 0.5));
     sizes.push_back(gemm_sizes(8192, 8192, 8192, 0.5, 0.5));
-    sizes.push_back(gemm_sizes(1<<14, 1<<14, 1<<14, 0.5, 0.5));
+    sizes.push_back(gemm_sizes(1 << 14, 1 << 14, 1 << 14, 0.5, 0.5));
 
     for (auto size : sizes) {
         int m = size.m;
@@ -401,6 +402,7 @@ int main() {
         delete[] b_cpu;
         delete[] out_cpu;
         delete[] out_cuda_;
+        delete[] out_cuda_ref_;
     }
     return 0;
 }

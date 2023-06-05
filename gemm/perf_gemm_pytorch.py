@@ -1,12 +1,12 @@
 import torch
 from torch.utils import benchmark
 
-typ = torch.float  #数据精度
-m = 1024
-n = 1024
-k = 1024
-a = torch.randn(m, k).type(typ).cuda()
-b = torch.randn(k, n).type(typ).cuda()
+typ = torch.half  #数据精度
+m = 4096
+n = 4096
+k = 4096
+# a = torch.randn(m, k).type(typ).cuda()
+# b = torch.randn(k, n).type(typ).cuda()
 
 # t = benchmark.Timer(
 #       stmt='a @ b',
@@ -16,9 +16,9 @@ b = torch.randn(k, n).type(typ).cuda()
 # print(2*n**3 / x.median /1e12)
 
 
-a = torch.randn(n, n).cuda()
-b = torch.randn(n, n).cuda()
-c = torch.randn(n, n).cuda()
+a = torch.randn(n, n).type(typ).cuda()
+b = torch.randn(n, n).type(typ).cuda()
+c = torch.randn(n, n).type(typ).cuda()
 for i in range(3):
     with torch.profiler.profile(
         activities=[
