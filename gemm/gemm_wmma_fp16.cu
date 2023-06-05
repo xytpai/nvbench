@@ -79,19 +79,28 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
         a_begin < block_y * BLOCK_M * k + k;
         a_begin += BLOCK_K, b_begin += BLOCK_K * n) {
         {
+            ldg_vec_t ldg_a_reg[LDG_REG_A_COUNT];
+            ldg_vec_t ldg_b_reg[LDG_REG_B_COUNT];
 #pragma unroll
             for (int i = 0; i < LDG_REG_A_COUNT; i++) {
                 auto idx = 256 * i + tid;
-                reinterpret_cast<ldg_vec_t *>(&as[write_stage_idx])[idx] = 
-                    reinterpret_cast<ldg_vec_t *>(const_cast<scalar_t *>(a) + a_begin + (idx / LDG_A_X_THREADS) * k)[ldg_a_vec_idx];
+                ldg_a_reg[i] = reinterpret_cast<ldg_vec_t *>(const_cast<scalar_t *>(a) + a_begin + (idx / LDG_A_X_THREADS) * k)[ldg_a_vec_idx];
             }
 #pragma unroll
             for (int i = 0; i < LDG_REG_B_COUNT; i++) {
                 auto idx = 256 * i + tid;
-                reinterpret_cast<ldg_vec_t *>(&bs[write_stage_idx])[idx] = 
-                    reinterpret_cast<ldg_vec_t *>(const_cast<scalar_t *>(b) + b_begin + (idx / LDG_B_X_THREADS) * n)[ldg_b_vec_idx];
+                ldg_b_reg[i] = reinterpret_cast<ldg_vec_t *>(const_cast<scalar_t *>(b) + b_begin + (idx / LDG_B_X_THREADS) * n)[ldg_b_vec_idx];
             }
-
+            auto as_vec = reinterpret_cast<ldg_vec_t *>(as[write_stage_idx]);
+            auto bs_vec = reinterpret_cast<ldg_vec_t *>(bs[write_stage_idx]);
+#pragma unroll
+            for (int i = 0; i < LDG_REG_A_COUNT; i++) {
+                as_vec[256 * i + tid] = ldg_a_reg[i];
+            }
+#pragma unroll
+            for (int i = 0; i < LDG_REG_A_COUNT; i++) {
+                bs_vec[256 * i + tid] = ldg_b_reg[i];
+            }
             read_stage_idx ^= 1;
             write_stage_idx ^= 1;
             __syncthreads();
@@ -102,7 +111,7 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
             auto b_ptr = bs[read_stage_idx];
             auto warp_y = wid / BLOCK_N_WARPS * WARP_M;
             auto warp_x = wid % BLOCK_N_WARPS * WARP_N;
-            
+
 #pragma unroll
             for (int i = 0; i < WARP_M_LANES; i++) {
                 int lane_y = warp_y + i * LANE_M;
@@ -129,7 +138,6 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     { // write back
         auto out_warp_y = block_y * BLOCK_M + wid / BLOCK_N_WARPS * WARP_M;
         auto out_warp_x = block_x * BLOCK_N + wid % BLOCK_N_WARPS * WARP_N;
-        using stg_vec_t = aligned_array<scalar_t, VEC_N>;
 #pragma unroll
         for (int i = 0; i < WARP_M_LANES; i++) {
 #pragma unroll
@@ -139,7 +147,8 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
                 auto out_offset = out_lane_y * n + out_lane_x;
                 nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, scalar_t> c_frag;
                 nvcuda::wmma::load_matrix_sync(c_frag, out + out_offset, n, nvcuda::wmma::mem_row_major);
-                for(int k=0; k < c_frag.num_elements; k++) {
+#pragma unroll
+                for (int k = 0; k < 8; k++) {
                     c_frag.x[k] = alpha * (scalar_t)o_frag[i][j].x[k] + beta * c_frag.x[k];
                 }
                 nvcuda::wmma::store_matrix_sync(out + out_offset, c_frag, n, nvcuda::wmma::mem_row_major);
@@ -173,8 +182,7 @@ float gemm_cuda_impl(
         constexpr int BLOCK_K = 32;
         gemm_cuda_kernel<scalar_t, /*BLOCK_K*/ BLOCK_K,
                          /*BLOCK_M_WARPS*/ 4, /*BLOCK_N_WARPS*/ 2, /*WARP_M_LANES*/ 4, /*WARP_N_LANES*/ 4,
-                         /*WARP_M_THREADS*/ 8, /*WARP_N_THREADS*/ 4, /*VEC_M*/ 2, /*VEC_N*/ 4
-                         ><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
+                         /*WARP_M_THREADS*/ 8, /*WARP_N_THREADS*/ 4, /*VEC_M*/ 2, /*VEC_N*/ 4><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
     }
 
     cudaDeviceSynchronize();
