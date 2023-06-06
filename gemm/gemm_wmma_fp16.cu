@@ -14,50 +14,48 @@ struct alignas(sizeof(scalar_t) * vec_size) aligned_array {
 
 template <typename scalar_t,
           int BLOCK_K,
-          int BLOCK_M_WARPS, int BLOCK_N_WARPS,
-          int WARP_M_LANES, int WARP_N_LANES,
+          int BLOCK_M_LANES, int BLOCK_N_LANES,
+          int LANE_M_WARPS, int LANE_N_WARPS,
           int WARP_M_THREADS, int WARP_N_THREADS,
           int VEC_M, int VEC_N>
 __global__ __launch_bounds__(256) void gemm_cuda_kernel(
-    scalar_t * __restrict__ out,
-    const scalar_t * __restrict__ a,
-    const scalar_t * __restrict__ b,
+    scalar_t *__restrict__ out,
+    const scalar_t *__restrict__ a,
+    const scalar_t *__restrict__ b,
     const int m, const int n, const int k,
     const scalar_t alpha,
     const scalar_t beta) {
-    static_assert(BLOCK_M_WARPS * BLOCK_N_WARPS == 8);
-    static_assert(WARP_M_THREADS * WARP_N_THREADS == 32);
-    constexpr int LANE_M = WARP_M_THREADS * VEC_M;
-    constexpr int LANE_N = WARP_N_THREADS * VEC_N;
-    static_assert(LANE_M == 16);
-    static_assert(LANE_N == 16);
     static_assert(BLOCK_K == 32);
-    constexpr int WARP_M = WARP_M_LANES * LANE_M;
-    constexpr int WARP_N = WARP_N_LANES * LANE_N;
-    constexpr int BLOCK_M = BLOCK_M_WARPS * WARP_M;
-    constexpr int BLOCK_N = BLOCK_N_WARPS * WARP_N;
-    constexpr int BLOCK_KM_SIZE = BLOCK_K * BLOCK_M;
-    constexpr int BLOCK_KN_SIZE = BLOCK_K * BLOCK_N;
+    static_assert(LANE_M_WARPS * LANE_N_WARPS == 8);
+    static_assert(WARP_M_THREADS * WARP_N_THREADS == 32);
+    constexpr int WARP_M = WARP_M_THREADS * VEC_M;
+    constexpr int WARP_N = WARP_N_THREADS * VEC_N;
+    static_assert(WARP_M == 16);
+    static_assert(WARP_N == 16);
+    constexpr int LANE_M = LANE_M_WARPS * WARP_M;
+    constexpr int LANE_N = LANE_N_WARPS * WARP_N;
+    constexpr int BLOCK_M = BLOCK_M_LANES * LANE_M;
+    constexpr int BLOCK_N = BLOCK_N_LANES * LANE_N;
 
-    // get idx
+    // idx
     auto tid = threadIdx.x;
     auto wid = tid >> 5;
     // auto w_tid = tid & 31;
     auto block_y = blockIdx.y;
     auto block_x = blockIdx.z * gridDim.x + blockIdx.x;
 
-    // get slm
+    // slm
     constexpr int PAD = 16;
-    __shared__ scalar_t as[2][BLOCK_KM_SIZE + PAD * BLOCK_K];
-    __shared__ scalar_t bs[2][BLOCK_KN_SIZE + PAD * BLOCK_N];
+    __shared__ scalar_t as[2][BLOCK_M * (BLOCK_K + PAD)];
+    __shared__ scalar_t bs[2][BLOCK_K * (BLOCK_N + PAD)];
 
-    nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, scalar_t, nvcuda::wmma::row_major> a_frag[2][WARP_M_LANES];
-    nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, scalar_t, nvcuda::wmma::row_major> b_frag[2][WARP_N_LANES];
-    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> o_frag[WARP_M_LANES][WARP_N_LANES];
+    nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, scalar_t, nvcuda::wmma::row_major> a_frag[2][BLOCK_M_LANES];
+    nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, scalar_t, nvcuda::wmma::row_major> b_frag[2][BLOCK_N_LANES];
+    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> o_frag[BLOCK_M_LANES][BLOCK_N_LANES];
 #pragma unroll
-    for (int i = 0; i < WARP_M_LANES; i++) {
+    for (int i = 0; i < BLOCK_M_LANES; i++) {
 #pragma unroll
-        for (int j = 0; j < WARP_N_LANES; j++) {
+        for (int j = 0; j < BLOCK_N_LANES; j++) {
             nvcuda::wmma::fill_fragment(o_frag[i][j], 0.0);
         }
     }
@@ -68,8 +66,8 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     constexpr int LDG_B_X_THREADS = BLOCK_N / LDG_VEC_SIZE;
     auto ldg_a_vec_idx = tid % LDG_A_X_THREADS;
     auto ldg_b_vec_idx = tid % LDG_B_X_THREADS;
-    constexpr int LDG_REG_A_COUNT = BLOCK_KM_SIZE / LDG_VEC_SIZE / 256;
-    constexpr int LDG_REG_B_COUNT = BLOCK_KN_SIZE / LDG_VEC_SIZE / 256;
+    constexpr int LDG_REG_A_COUNT = BLOCK_M * BLOCK_K / LDG_VEC_SIZE / 256;
+    constexpr int LDG_REG_B_COUNT = BLOCK_K * BLOCK_N / LDG_VEC_SIZE / 256;
     static_assert(LDG_REG_A_COUNT >= 1 && LDG_REG_B_COUNT >= 1);
 
     int write_stage_idx = 0;
@@ -97,12 +95,12 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
 #pragma unroll
             for (int i = 0; i < LDG_REG_A_COUNT; i++) {
                 int y = (256 * i + tid) / LDG_A_X_THREADS;
-                as_vec[y * (BLOCK_K + PAD) / LDG_VEC_SIZE + ldg_a_vec_idx] = ldg_a_reg[i];
+                as_vec[y * ((BLOCK_K + PAD) / LDG_VEC_SIZE) + ldg_a_vec_idx] = ldg_a_reg[i];
             }
 #pragma unroll
             for (int i = 0; i < LDG_REG_B_COUNT; i++) {
                 int y = (256 * i + tid) / LDG_B_X_THREADS;
-                bs_vec[y * (BLOCK_N + PAD) / LDG_VEC_SIZE + ldg_b_vec_idx] = ldg_b_reg[i];
+                bs_vec[y * ((BLOCK_N + PAD) / LDG_VEC_SIZE) + ldg_b_vec_idx] = ldg_b_reg[i];
             }
             read_stage_idx ^= 1;
             write_stage_idx ^= 1;
@@ -112,25 +110,25 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
         {
             auto a_ptr = as[read_stage_idx];
             auto b_ptr = bs[read_stage_idx];
-            auto warp_y = wid / BLOCK_N_WARPS * WARP_M;
-            auto warp_x = wid % BLOCK_N_WARPS * WARP_N;
+            auto warp_y = wid / LANE_N_WARPS * WARP_M;
+            auto warp_x = wid % LANE_N_WARPS * WARP_N;
 
 #pragma unroll
-            for (int i = 0; i < WARP_M_LANES; i++) {
-                int lane_y = warp_y + i * LANE_M;
-                nvcuda::wmma::load_matrix_sync(a_frag[0][i], a_ptr + lane_y * (BLOCK_K+PAD), (BLOCK_K+PAD));
-                nvcuda::wmma::load_matrix_sync(a_frag[1][i], a_ptr + lane_y * (BLOCK_K+PAD) + 16, (BLOCK_K+PAD));
+            for (int i = 0; i < BLOCK_M_LANES; i++) {
+                auto y = i * LANE_M + warp_y;
+                nvcuda::wmma::load_matrix_sync(a_frag[0][i], a_ptr + y * (BLOCK_K + PAD), BLOCK_K + PAD);
+                nvcuda::wmma::load_matrix_sync(a_frag[1][i], a_ptr + y * (BLOCK_K + PAD) + 16, BLOCK_K + PAD);
             }
 #pragma unroll
-            for (int j = 0; j < WARP_N_LANES; j++) {
-                int lane_x = warp_x + j * LANE_N;
-                nvcuda::wmma::load_matrix_sync(b_frag[0][j], b_ptr + lane_x, (BLOCK_N+PAD));
-                nvcuda::wmma::load_matrix_sync(b_frag[1][j], b_ptr + lane_x + 16 * (BLOCK_N+PAD), (BLOCK_N+PAD));
+            for (int j = 0; j < BLOCK_N_LANES; j++) {
+                auto x = j * LANE_N + warp_x;
+                nvcuda::wmma::load_matrix_sync(b_frag[0][j], b_ptr + x, BLOCK_N + PAD);
+                nvcuda::wmma::load_matrix_sync(b_frag[1][j], b_ptr + x + 16 * (BLOCK_N + PAD), BLOCK_N + PAD);
             }
 #pragma unroll
-            for (int i = 0; i < WARP_M_LANES; i++) {
+            for (int i = 0; i < BLOCK_M_LANES; i++) {
 #pragma unroll
-                for (int j = 0; j < WARP_N_LANES; j++) {
+                for (int j = 0; j < BLOCK_N_LANES; j++) {
                     nvcuda::wmma::mma_sync(o_frag[i][j], a_frag[0][i], b_frag[0][j], o_frag[i][j]);
                     nvcuda::wmma::mma_sync(o_frag[i][j], a_frag[1][i], b_frag[1][j], o_frag[i][j]);
                 }
@@ -139,15 +137,15 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     }
 
     { // write back
-        auto out_warp_y = block_y * BLOCK_M + wid / BLOCK_N_WARPS * WARP_M;
-        auto out_warp_x = block_x * BLOCK_N + wid % BLOCK_N_WARPS * WARP_N;
+        auto out_warp_y = block_y * BLOCK_M + wid / LANE_N_WARPS * WARP_M;
+        auto out_warp_x = block_x * BLOCK_N + wid % LANE_N_WARPS * WARP_N;
 #pragma unroll
-        for (int i = 0; i < WARP_M_LANES; i++) {
+        for (int i = 0; i < BLOCK_M_LANES; i++) {
 #pragma unroll
-            for (int j = 0; j < WARP_N_LANES; j++) {
-                auto out_lane_y = out_warp_y + i * LANE_M;
-                auto out_lane_x = out_warp_x + j * LANE_N;
-                auto out_offset = out_lane_y * n + out_lane_x;
+            for (int j = 0; j < BLOCK_N_LANES; j++) {
+                auto y = out_warp_y + i * LANE_M;
+                auto x = out_warp_x + j * LANE_N;
+                auto out_offset = y * n + x;
                 nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, scalar_t> c_frag;
                 nvcuda::wmma::load_matrix_sync(c_frag, out + out_offset, n, nvcuda::wmma::mem_row_major);
 #pragma unroll
@@ -184,7 +182,7 @@ float gemm_cuda_impl(
     if constexpr (BLOCK_M == 128 && BLOCK_N == 128) {
         constexpr int BLOCK_K = 32;
         gemm_cuda_kernel<scalar_t, /*BLOCK_K*/ BLOCK_K,
-                         /*BLOCK_M_WARPS*/ 4, /*BLOCK_N_WARPS*/ 2, /*WARP_M_LANES*/ 2, /*WARP_N_LANES*/ 4,
+                         /*BLOCK_M_LANES*/ 2, /*BLOCK_N_LANES*/ 4, /*LANE_M_WARPS*/ 4, /*LANE_N_WARPS*/ 2,
                          /*WARP_M_THREADS*/ 4, /*WARP_N_THREADS*/ 8, /*VEC_M*/ 4, /*VEC_N*/ 2><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
     }
 
