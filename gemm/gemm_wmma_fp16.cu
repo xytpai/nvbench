@@ -144,13 +144,15 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
             for (int j = 0; j < BLOCK_N_LANES; j++) {
                 auto y = out_warp_y + i * LANE_M;
                 auto x = out_warp_x + j * LANE_N;
-                auto out_offset = y * n + x;
-                nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, scalar_t> c_frag;
-                nvcuda::wmma::load_matrix_sync(c_frag, out + out_offset, n, nvcuda::wmma::mem_row_major);
-                for (int k = 0; k < c_frag.num_elements; k++) {
-                    c_frag.x[k] = alpha * (scalar_t)o_frag[i][j].x[k] + beta * c_frag.x[k];
+                if (y < m && x < n) {
+                    auto out_offset = y * n + x;
+                    nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, scalar_t> c_frag;
+                    nvcuda::wmma::load_matrix_sync(c_frag, out + out_offset, n, nvcuda::wmma::mem_row_major);
+                    for (int k = 0; k < c_frag.num_elements; k++) {
+                        c_frag.x[k] = alpha * (scalar_t)o_frag[i][j].x[k] + beta * c_frag.x[k];
+                    }
+                    nvcuda::wmma::store_matrix_sync(out + out_offset, c_frag, n, nvcuda::wmma::mem_row_major);
                 }
-                nvcuda::wmma::store_matrix_sync(out + out_offset, c_frag, n, nvcuda::wmma::mem_row_major);
             }
         }
     }
@@ -164,8 +166,9 @@ float gemm_cuda_impl(
     const int m, const int n, const int k,
     const scalar_t alpha,
     const scalar_t beta) {
-    assert(k % 4 == 0);
-    assert(n % 4 == 0);
+    assert(m % 16 == 0);
+    assert(n % 16 == 0);
+    assert(k % 32 == 0);
     int m_blocks = (m + BLOCK_M - 1) / BLOCK_M;
     int n_blocks = (n + BLOCK_N - 1) / BLOCK_N;
     int split_num = (n_blocks + 4096 - 1) / 4096;
@@ -258,7 +261,7 @@ int main() {
     std::vector<gemm_sizes> sizes;
     sizes.push_back(gemm_sizes(512, 512, 512, 0.5, 0.5));
     sizes.push_back(gemm_sizes(1024, 1024, 1024, 0.5, 0.5));
-    // sizes.push_back(gemm_sizes(1028, 1028, 1028, 0.5, 0.5));
+    sizes.push_back(gemm_sizes(1024 + 16, 1024 + 16, 64, 0.5, 0.5));
     sizes.push_back(gemm_sizes(2048, 2048, 2048, 0.5, 0.5));
     sizes.push_back(gemm_sizes(4096, 4096, 4096, 0.5, 0.5));
     sizes.push_back(gemm_sizes(8192, 8192, 8192, 0.5, 0.5));
