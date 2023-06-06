@@ -13,7 +13,6 @@ struct alignas(sizeof(scalar_t) * vec_size) aligned_array {
 };
 
 template <typename scalar_t,
-          int BLOCK_K,
           int BLOCK_M_LANES, int BLOCK_N_LANES,
           int LANE_M_WARPS, int LANE_N_WARPS,
           int WARP_M_THREADS, int WARP_N_THREADS,
@@ -25,7 +24,7 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     const int m, const int n, const int k,
     const scalar_t alpha,
     const scalar_t beta) {
-    static_assert(BLOCK_K == 32);
+    constexpr int BLOCK_K = 32;
     static_assert(LANE_M_WARPS * LANE_N_WARPS == 8);
     static_assert(WARP_M_THREADS * WARP_N_THREADS == 32);
     constexpr int WARP_M = WARP_M_THREADS * VEC_M;
@@ -148,8 +147,7 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
                 auto out_offset = y * n + x;
                 nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, scalar_t> c_frag;
                 nvcuda::wmma::load_matrix_sync(c_frag, out + out_offset, n, nvcuda::wmma::mem_row_major);
-#pragma unroll
-                for (int k = 0; k < 8; k++) {
+                for (int k = 0; k < c_frag.num_elements; k++) {
                     c_frag.x[k] = alpha * (scalar_t)o_frag[i][j].x[k] + beta * c_frag.x[k];
                 }
                 nvcuda::wmma::store_matrix_sync(out + out_offset, c_frag, n, nvcuda::wmma::mem_row_major);
@@ -179,12 +177,8 @@ float gemm_cuda_impl(
     cudaEventCreate(&stop);
     cudaEventRecord(start);
 
-    if constexpr (BLOCK_M == 128 && BLOCK_N == 128) {
-        constexpr int BLOCK_K = 32;
-        gemm_cuda_kernel<scalar_t, /*BLOCK_K*/ BLOCK_K,
-                         /*BLOCK_M_LANES*/ 4, /*BLOCK_N_LANES*/ 2, /*LANE_M_WARPS*/ 2, /*LANE_N_WARPS*/ 4,
-                         /*WARP_M_THREADS*/ 8, /*WARP_N_THREADS*/ 4, /*VEC_M*/ 2, /*VEC_N*/ 4><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
-    }
+    gemm_cuda_kernel<scalar_t, /*BLOCK_M_LANES*/ BLOCK_M / 32, /*BLOCK_N_LANES*/ BLOCK_N / 64, /*LANE_M_WARPS*/ 2, /*LANE_N_WARPS*/ 4,
+                     /*WARP_M_THREADS*/ 8, /*WARP_N_THREADS*/ 4, /*VEC_M*/ 2, /*VEC_N*/ 4><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
 
     cudaDeviceSynchronize();
 
@@ -204,16 +198,15 @@ float gemm_cuda(
     const scalar_t alpha,
     const scalar_t beta) {
     auto min_size = std::min(m, n);
-    // if (min_size <= 512) {
-    //     return gemm_cuda_impl<scalar_t, 64, 64, true>(out, a, b, m, n, k, alpha, beta);
-    // } else if (min_size <= 1024) {
-    //     return gemm_cuda_impl<scalar_t, 128, 64, true>(out, a, b, m, n, k, alpha, beta);
-    // } else if (min_size <= 4096) {
-    //     return gemm_cuda_impl<scalar_t, 128, 128, true>(out, a, b, m, n, k, alpha, beta);
-    // } else {
-    //     return gemm_cuda_impl<scalar_t, 256, 128, true>(out, a, b, m, n, k, alpha, beta);
-    // }
-    return gemm_cuda_impl<scalar_t, 128, 128>(out, a, b, m, n, k, alpha, beta);
+    if (min_size <= 1024) {
+        return gemm_cuda_impl<scalar_t, 64, 64>(out, a, b, m, n, k, alpha, beta);
+    } else if (min_size <= 2048) {
+        return gemm_cuda_impl<scalar_t, 64, 128>(out, a, b, m, n, k, alpha, beta);
+    } else if (min_size <= 4096) {
+        return gemm_cuda_impl<scalar_t, 64, 128>(out, a, b, m, n, k, alpha, beta);
+    } else {
+        return gemm_cuda_impl<scalar_t, 128, 128>(out, a, b, m, n, k, alpha, beta);
+    }
 }
 
 template <typename scalar_t>
@@ -263,13 +256,13 @@ int main() {
     using scalar_t = __half;
 
     std::vector<gemm_sizes> sizes;
-    // sizes.push_back(gemm_sizes(512, 512, 512, 0.5, 0.5));
+    sizes.push_back(gemm_sizes(512, 512, 512, 0.5, 0.5));
     sizes.push_back(gemm_sizes(1024, 1024, 1024, 0.5, 0.5));
     // sizes.push_back(gemm_sizes(1028, 1028, 1028, 0.5, 0.5));
     sizes.push_back(gemm_sizes(2048, 2048, 2048, 0.5, 0.5));
     sizes.push_back(gemm_sizes(4096, 4096, 4096, 0.5, 0.5));
     sizes.push_back(gemm_sizes(8192, 8192, 8192, 0.5, 0.5));
-    // sizes.push_back(gemm_sizes(1<<14, 1<<14, 1<<14, 0.5, 0.5));
+    sizes.push_back(gemm_sizes(1 << 14, 1 << 14, 1 << 14, 0.5, 0.5));
 
     for (auto size : sizes) {
         int m = size.m;
