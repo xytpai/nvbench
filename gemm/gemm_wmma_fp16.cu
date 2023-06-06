@@ -16,7 +16,8 @@ template <typename scalar_t,
           int BLOCK_M_LANES, int BLOCK_N_LANES,
           int LANE_M_WARPS, int LANE_N_WARPS,
           int WARP_M_THREADS, int WARP_N_THREADS,
-          int VEC_M, int VEC_N>
+          int VEC_M, int VEC_N,
+          int PAD = 8>
 __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     scalar_t *__restrict__ out,
     const scalar_t *__restrict__ a,
@@ -44,7 +45,6 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     auto block_x = blockIdx.z * gridDim.x + blockIdx.x;
 
     // slm
-    constexpr int PAD = 16;
     __shared__ scalar_t as[2][BLOCK_M * (BLOCK_K + PAD)];
     __shared__ scalar_t bs[2][BLOCK_K * (BLOCK_N + PAD)];
 
