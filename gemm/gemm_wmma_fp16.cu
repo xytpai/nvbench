@@ -19,9 +19,9 @@ template <typename scalar_t,
           int WARP_M_THREADS, int WARP_N_THREADS,
           int VEC_M, int VEC_N>
 __global__ __launch_bounds__(256) void gemm_cuda_kernel(
-    scalar_t *out,
-    const scalar_t *a,
-    const scalar_t *b,
+    scalar_t * __restrict__ out,
+    const scalar_t * __restrict__ a,
+    const scalar_t * __restrict__ b,
     const int m, const int n, const int k,
     const scalar_t alpha,
     const scalar_t beta) {
@@ -47,8 +47,9 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     auto block_x = blockIdx.z * gridDim.x + blockIdx.x;
 
     // get slm
-    __shared__ scalar_t as[2][BLOCK_KM_SIZE];
-    __shared__ scalar_t bs[2][BLOCK_KN_SIZE];
+    constexpr int PAD = 16;
+    __shared__ scalar_t as[2][BLOCK_KM_SIZE + PAD * BLOCK_K];
+    __shared__ scalar_t bs[2][BLOCK_KN_SIZE + PAD * BLOCK_N];
 
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, scalar_t, nvcuda::wmma::row_major> a_frag[2][WARP_M_LANES];
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, scalar_t, nvcuda::wmma::row_major> b_frag[2][WARP_N_LANES];
@@ -95,11 +96,13 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
             auto bs_vec = reinterpret_cast<ldg_vec_t *>(bs[write_stage_idx]);
 #pragma unroll
             for (int i = 0; i < LDG_REG_A_COUNT; i++) {
-                as_vec[256 * i + tid] = ldg_a_reg[i];
+                int y = (256 * i + tid) / LDG_A_X_THREADS;
+                as_vec[y * (BLOCK_K + PAD) / LDG_VEC_SIZE + ldg_a_vec_idx] = ldg_a_reg[i];
             }
 #pragma unroll
-            for (int i = 0; i < LDG_REG_A_COUNT; i++) {
-                bs_vec[256 * i + tid] = ldg_b_reg[i];
+            for (int i = 0; i < LDG_REG_B_COUNT; i++) {
+                int y = (256 * i + tid) / LDG_B_X_THREADS;
+                bs_vec[y * (BLOCK_N + PAD) / LDG_VEC_SIZE + ldg_b_vec_idx] = ldg_b_reg[i];
             }
             read_stage_idx ^= 1;
             write_stage_idx ^= 1;
@@ -115,14 +118,14 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
 #pragma unroll
             for (int i = 0; i < WARP_M_LANES; i++) {
                 int lane_y = warp_y + i * LANE_M;
-                nvcuda::wmma::load_matrix_sync(a_frag[0][i], a_ptr + lane_y * BLOCK_K, BLOCK_K);
-                nvcuda::wmma::load_matrix_sync(a_frag[1][i], a_ptr + lane_y * BLOCK_K + 16, BLOCK_K);
+                nvcuda::wmma::load_matrix_sync(a_frag[0][i], a_ptr + lane_y * (BLOCK_K+PAD), (BLOCK_K+PAD));
+                nvcuda::wmma::load_matrix_sync(a_frag[1][i], a_ptr + lane_y * (BLOCK_K+PAD) + 16, (BLOCK_K+PAD));
             }
 #pragma unroll
             for (int j = 0; j < WARP_N_LANES; j++) {
                 int lane_x = warp_x + j * LANE_N;
-                nvcuda::wmma::load_matrix_sync(b_frag[0][j], b_ptr + lane_x, BLOCK_N);
-                nvcuda::wmma::load_matrix_sync(b_frag[1][j], b_ptr + lane_x + 16 * BLOCK_N, BLOCK_N);
+                nvcuda::wmma::load_matrix_sync(b_frag[0][j], b_ptr + lane_x, (BLOCK_N+PAD));
+                nvcuda::wmma::load_matrix_sync(b_frag[1][j], b_ptr + lane_x + 16 * (BLOCK_N+PAD), (BLOCK_N+PAD));
             }
 #pragma unroll
             for (int i = 0; i < WARP_M_LANES; i++) {
@@ -178,11 +181,11 @@ float gemm_cuda_impl(
     cudaEventCreate(&stop);
     cudaEventRecord(start);
 
-    if constexpr (BLOCK_M == 256 && BLOCK_N == 128) {
+    if constexpr (BLOCK_M == 128 && BLOCK_N == 128) {
         constexpr int BLOCK_K = 32;
         gemm_cuda_kernel<scalar_t, /*BLOCK_K*/ BLOCK_K,
-                         /*BLOCK_M_WARPS*/ 4, /*BLOCK_N_WARPS*/ 2, /*WARP_M_LANES*/ 4, /*WARP_N_LANES*/ 4,
-                         /*WARP_M_THREADS*/ 8, /*WARP_N_THREADS*/ 4, /*VEC_M*/ 2, /*VEC_N*/ 4><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
+                         /*BLOCK_M_WARPS*/ 4, /*BLOCK_N_WARPS*/ 2, /*WARP_M_LANES*/ 2, /*WARP_N_LANES*/ 4,
+                         /*WARP_M_THREADS*/ 4, /*WARP_N_THREADS*/ 8, /*VEC_M*/ 4, /*VEC_N*/ 2><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
     }
 
     cudaDeviceSynchronize();
@@ -212,7 +215,7 @@ float gemm_cuda(
     // } else {
     //     return gemm_cuda_impl<scalar_t, 256, 128, true>(out, a, b, m, n, k, alpha, beta);
     // }
-    return gemm_cuda_impl<scalar_t, 256, 128>(out, a, b, m, n, k, alpha, beta);
+    return gemm_cuda_impl<scalar_t, 128, 128>(out, a, b, m, n, k, alpha, beta);
 }
 
 template <typename scalar_t>
@@ -259,7 +262,7 @@ struct gemm_sizes {
 
 int main() {
     std::cout << "gemm_wmma_fp16\n";
-    using scalar_t = half;
+    using scalar_t = __half;
 
     std::vector<gemm_sizes> sizes;
     // sizes.push_back(gemm_sizes(512, 512, 512, 0.5, 0.5));
