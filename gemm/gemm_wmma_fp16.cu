@@ -182,8 +182,8 @@ float gemm_cuda_impl(
     if constexpr (BLOCK_M == 128 && BLOCK_N == 128) {
         constexpr int BLOCK_K = 32;
         gemm_cuda_kernel<scalar_t, /*BLOCK_K*/ BLOCK_K,
-                         /*BLOCK_M_LANES*/ 2, /*BLOCK_N_LANES*/ 4, /*LANE_M_WARPS*/ 4, /*LANE_N_WARPS*/ 2,
-                         /*WARP_M_THREADS*/ 4, /*WARP_N_THREADS*/ 8, /*VEC_M*/ 4, /*VEC_N*/ 2><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
+                         /*BLOCK_M_LANES*/ 4, /*BLOCK_N_LANES*/ 2, /*LANE_M_WARPS*/ 2, /*LANE_N_WARPS*/ 4,
+                         /*WARP_M_THREADS*/ 8, /*WARP_N_THREADS*/ 4, /*VEC_M*/ 2, /*VEC_N*/ 4><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
     }
 
     cudaDeviceSynchronize();
