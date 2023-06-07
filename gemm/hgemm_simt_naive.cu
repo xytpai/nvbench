@@ -79,7 +79,7 @@ struct gemm_sizes {
 };
 
 int main() {
-    std::cout << "gemm_simt_fp16_naive\n";
+    std::cout << "hgemm_simt_naive\n";
     using scalar_t = half;
 
     std::vector<gemm_sizes> sizes;
