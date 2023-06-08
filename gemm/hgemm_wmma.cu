@@ -152,6 +152,7 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
                         c_frag.x[k] = alpha * (scalar_t)o_frag[i][j].x[k] + beta * c_frag.x[k];
                     }
                     nvcuda::wmma::store_matrix_sync(out + out_offset, c_frag, n, nvcuda::wmma::mem_row_major);
+                    __syncthreads();
                 }
             }
         }
@@ -171,7 +172,8 @@ float gemm_cuda_impl(
     assert(k % 32 == 0);
     int m_blocks = (m + BLOCK_M - 1) / BLOCK_M;
     int n_blocks = (n + BLOCK_N - 1) / BLOCK_N;
-    int split_num = (n_blocks + 4096 - 1) / 4096;
+    constexpr int ZSPLIT = 32;
+    int split_num = (n_blocks + ZSPLIT - 1) / ZSPLIT;
     dim3 block(256);
     dim3 grid((n_blocks + split_num - 1) / split_num, m_blocks, split_num);
 
