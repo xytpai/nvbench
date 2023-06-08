@@ -12,16 +12,6 @@ struct alignas(sizeof(scalar_t) * vec_size) aligned_array {
     scalar_t val[vec_size];
 };
 
-template <typename scalar_t, int size>
-struct array {
-    scalar_t val[size];
-};
-
-template <typename scalar_t, int dim0, int dim1>
-struct array2d {
-    scalar_t val[dim0][dim1];
-};
-
 template <typename scalar_t, typename acc_t>
 struct mma_16x8x16 {
     using FragmentA = aligned_array<scalar_t, 8>;
@@ -45,58 +35,39 @@ struct mma_16x8x16 {
     }
 };
 
-template <typename scalar_t, typename acc_t, int M, int N, int K = 16>
-struct mma_worker {
-    static_assert(M % 16 == 0);
-    static_assert(N % 8 == 0);
-    static_assert(K == 16);
+template <typename scalar_t, typename acc_t>
+struct mma_16x8x16_worker {
     enum {
-        A_LANES = M / 16,
-        B_LANES = N / 8,
+        K = 16,
     };
-    using FragmentA = array<aligned_array<scalar_t, 8>, A_LANES>;
-    using FragmentB = array<aligned_array<scalar_t, 4>, B_LANES>;
-    using FragmentC = array2d<aligned_array<acc_t, 4>, A_LANES, B_LANES>;
+    using FragmentA = aligned_array<scalar_t, 8>;
+    using FragmentB = aligned_array<scalar_t, 4>;
+    using FragmentC = aligned_array<acc_t, 4>;
 
     __forceinline__ __device__ void fill_fragment_c(FragmentC &c, acc_t val) {
-#pragma unroll
-        for (int i = 0; i < A_LANES; i++) {
-#pragma unroll
-            for (int j = 0; j < B_LANES; j++) {
-                c.val[i][j].val[0] = val;
-                c.val[i][j].val[1] = val;
-                c.val[i][j].val[2] = val;
-                c.val[i][j].val[3] = val;
-            }
-        }
+        c.val[0] = val;
+        c.val[1] = val;
+        c.val[2] = val;
+        c.val[3] = val;
     }
 
     __forceinline__ __device__ void load_matrix_a(FragmentA &a, scalar_t *ptr, int stride, int w_tid) {
         auto x = w_tid % 4 * 2;
-#pragma unroll
-        for (int i = 0; i < A_LANES; i++) {
-            auto y = w_tid / 4 * A_LANES + i;
-            a.val[i].val[0] = ptr[y * stride + x + 0];
-            a.val[i].val[1] = ptr[y * stride + x + 1];
-            a.val[i].val[2] = ptr[(y + 8 * A_LANES) * stride + x + 0];
-            a.val[i].val[3] = ptr[(y + 8 * A_LANES) * stride + x + 1];
-            a.val[i].val[4] = ptr[y * stride + 8 + x + 0];
-            a.val[i].val[5] = ptr[y * stride + 8 + x + 1];
-            a.val[i].val[6] = ptr[(y + 8 * A_LANES) * stride + 8 + x + 0];
-            a.val[i].val[7] = ptr[(y + 8 * A_LANES) * stride + 8 + x + 1];
-        }
+        auto y = w_tid / 4;
+        using vec_t = aligned_array<scalar_t, 2>;
+        *reinterpret_cast<vec_t *>(&a.val[0]) = *reinterpret_cast<vec_t *>(&ptr[y * stride + x]);
+        *reinterpret_cast<vec_t *>(&a.val[2]) = *reinterpret_cast<vec_t *>(&ptr[(y + 8) * stride + x]);
+        *reinterpret_cast<vec_t *>(&a.val[4]) = *reinterpret_cast<vec_t *>(&ptr[y * stride + 8 + x]);
+        *reinterpret_cast<vec_t *>(&a.val[6]) = *reinterpret_cast<vec_t *>(&ptr[(y + 8) * stride + 8 + x]);
     }
 
     __forceinline__ __device__ void load_matrix_b(FragmentB &b, scalar_t *ptr, int stride, int w_tid) {
         auto y = w_tid % 4 * 2;
-#pragma unroll
-        for (int i = 0; i < B_LANES; i++) {
-            auto x = w_tid / 4 * B_LANES + i;
-            b.val[i].val[0] = ptr[y * stride + x];
-            b.val[i].val[1] = ptr[(y + 1) * stride + x];
-            b.val[i].val[2] = ptr[(8 + y) * stride + x];
-            b.val[i].val[3] = ptr[(8 + y + 1) * stride + x];
-        }
+        auto x = w_tid / 4;
+        b.val[0] = ptr[y * stride + x];
+        b.val[1] = ptr[(y + 1) * stride + x];
+        b.val[2] = ptr[(8 + y) * stride + x];
+        b.val[3] = ptr[(8 + y + 1) * stride + x];
     }
 
     __forceinline__ __device__ void operator()(
@@ -105,33 +76,21 @@ struct mma_worker {
         FragmentB const &b,
         FragmentC const &c) const {
         mma_16x8x16<scalar_t, acc_t> mma;
-#pragma unroll
-        for (int i = 0; i < A_LANES; i++) {
-#pragma unroll
-            for (int j = 0; j < B_LANES; j++) {
-                mma(d.val[i][j], a.val[i], b.val[j], c.val[i][j]);
-            }
-        }
+        mma(d, a, b, c);
     }
 
     __forceinline__ __device__ void store_matrix(scalar_t *ptr, FragmentC &c, int stride, int w_tid, scalar_t alpha, scalar_t beta) {
-        auto y = w_tid / 4 * A_LANES;
-        auto x = w_tid % 4 * 2 * B_LANES;
-        using vec_t = aligned_array<scalar_t, B_LANES * 2>;
-#pragma unroll
-        for (int i = 0; i < A_LANES; i++) {
-            auto vec0 = *reinterpret_cast<vec_t *>(&ptr[(y + i) * stride + x]);
-            auto vec1 = *reinterpret_cast<vec_t *>(&ptr[(y + i + 8 * A_LANES) * stride + x]);
-#pragma unroll
-            for (int j = 0; j < B_LANES; j++) {
-                vec0.val[j * 2] = alpha * (scalar_t)c.val[i][j].val[0] + beta * vec0.val[j * 2];
-                vec0.val[j * 2 + 1] = alpha * (scalar_t)c.val[i][j].val[1] + beta * vec0.val[j * 2 + 1];
-                vec1.val[j * 2] = alpha * (scalar_t)c.val[i][j].val[2] + beta * vec1.val[j * 2];
-                vec1.val[j * 2 + 1] = alpha * (scalar_t)c.val[i][j].val[3] + beta * vec1.val[j * 2 + 1];
-            }
-            *reinterpret_cast<vec_t *>(&ptr[(y + i) * stride + x]) = vec0;
-            *reinterpret_cast<vec_t *>(&ptr[(y + i + 8 * A_LANES) * stride + x]) = vec1;
-        }
+        auto y = w_tid / 4;
+        auto x = w_tid % 4 * 2;
+        using vec_t = aligned_array<scalar_t, 2>;
+        auto vec0 = *reinterpret_cast<vec_t *>(&ptr[y * stride + x]);
+        auto vec1 = *reinterpret_cast<vec_t *>(&ptr[(y + 8) * stride + x]);
+        vec0.val[0] = alpha * (scalar_t)c.val[0] + beta * vec0.val[0];
+        vec0.val[1] = alpha * (scalar_t)c.val[1] + beta * vec0.val[1];
+        vec1.val[0] = alpha * (scalar_t)c.val[2] + beta * vec1.val[0];
+        vec1.val[1] = alpha * (scalar_t)c.val[3] + beta * vec1.val[1];
+        *reinterpret_cast<vec_t *>(&ptr[y * stride + x]) = vec0;
+        *reinterpret_cast<vec_t *>(&ptr[(y + 8) * stride + x]) = vec1;
     }
 };
 
@@ -153,8 +112,8 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     static_assert(WARP_M_THREADS * WARP_N_THREADS == 32);
     constexpr int WARP_M = WARP_M_THREADS * VEC_M;
     constexpr int WARP_N = WARP_N_THREADS * VEC_N;
-    static_assert(WARP_M % 16 == 0);
-    static_assert(WARP_N % 8 == 0);
+    static_assert(WARP_M == 16);
+    static_assert(WARP_N == 8);
     constexpr int LANE_M = LANE_M_WARPS * WARP_M;
     constexpr int LANE_N = LANE_N_WARPS * WARP_N;
     constexpr int BLOCK_M = BLOCK_M_LANES * LANE_M;
@@ -171,7 +130,7 @@ __global__ __launch_bounds__(256) void gemm_cuda_kernel(
     __shared__ scalar_t as[2][BLOCK_M * (BLOCK_K + PAD)];
     __shared__ scalar_t bs[2][BLOCK_K * (BLOCK_N + PAD)];
 
-    using mma_t = mma_worker<scalar_t, float, WARP_M, WARP_N>;
+    using mma_t = mma_16x8x16_worker<scalar_t, float>;
     mma_t mma;
     typename mma_t::FragmentA a_frag[2][BLOCK_M_LANES];
     typename mma_t::FragmentB b_frag[2][BLOCK_N_LANES];
@@ -293,7 +252,8 @@ float gemm_cuda_impl(
     assert(k % 32 == 0);
     int m_blocks = (m + BLOCK_M - 1) / BLOCK_M;
     int n_blocks = (n + BLOCK_N - 1) / BLOCK_N;
-    int split_num = (n_blocks + 4096 - 1) / 4096;
+    constexpr int ZSPLIT = 32;
+    int split_num = (n_blocks + ZSPLIT - 1) / ZSPLIT;
     dim3 block(256);
     dim3 grid((n_blocks + split_num - 1) / split_num, m_blocks, split_num);
 
@@ -302,8 +262,8 @@ float gemm_cuda_impl(
     cudaEventCreate(&stop);
     cudaEventRecord(start);
 
-    gemm_cuda_kernel<scalar_t, /*BLOCK_M_LANES*/ BLOCK_M / 32, /*BLOCK_N_LANES*/ BLOCK_N / 64, /*LANE_M_WARPS*/ 2, /*LANE_N_WARPS*/ 4,
-                     /*WARP_M_THREADS*/ 8, /*WARP_N_THREADS*/ 4, /*VEC_M*/ 2, /*VEC_N*/ 4><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
+    gemm_cuda_kernel<scalar_t, /*BLOCK_M_LANES*/ BLOCK_M / 32, /*BLOCK_N_LANES*/ BLOCK_N / 32, /*LANE_M_WARPS*/ 2, /*LANE_N_WARPS*/ 4,
+                     /*WARP_M_THREADS*/ 8, /*WARP_N_THREADS*/ 4, /*VEC_M*/ 2, /*VEC_N*/ 2><<<grid, block>>>(out, a, b, m, n, k, alpha, beta);
 
     cudaDeviceSynchronize();
 
@@ -322,17 +282,16 @@ float gemm_cuda(
     const int m, const int n, const int k,
     const scalar_t alpha,
     const scalar_t beta) {
-    // auto min_size = std::min(m, n);
-    // if (min_size <= 1024) {
-    //     return gemm_cuda_impl<scalar_t, 64, 64>(out, a, b, m, n, k, alpha, beta);
-    // } else if (min_size <= 2048) {
-    //     return gemm_cuda_impl<scalar_t, 64, 128>(out, a, b, m, n, k, alpha, beta);
-    // } else if (min_size <= 4096) {
-    //     return gemm_cuda_impl<scalar_t, 64, 128>(out, a, b, m, n, k, alpha, beta);
-    // } else {
-    //     return gemm_cuda_impl<scalar_t, 128, 128>(out, a, b, m, n, k, alpha, beta);
-    // }
-    return gemm_cuda_impl<scalar_t, 128, 128>(out, a, b, m, n, k, alpha, beta);
+    auto min_size = std::min(m, n);
+    if (min_size <= 1024) {
+        return gemm_cuda_impl<scalar_t, 64, 64>(out, a, b, m, n, k, alpha, beta);
+    } else if (min_size <= 2048) {
+        return gemm_cuda_impl<scalar_t, 64, 128>(out, a, b, m, n, k, alpha, beta);
+    } else if (min_size <= 4096) {
+        return gemm_cuda_impl<scalar_t, 64, 128>(out, a, b, m, n, k, alpha, beta);
+    } else {
+        return gemm_cuda_impl<scalar_t, 128, 128>(out, a, b, m, n, k, alpha, beta);
+    }
 }
 
 template <typename scalar_t>
@@ -388,7 +347,7 @@ int main() {
     sizes.push_back(gemm_sizes(2048, 2048, 2048, 0.5, 0.5));
     sizes.push_back(gemm_sizes(4096, 4096, 4096, 0.5, 0.5));
     sizes.push_back(gemm_sizes(8192, 8192, 8192, 0.5, 0.5));
-    // sizes.push_back(gemm_sizes(1 << 14, 1 << 14, 1 << 14, 0.5, 0.5));
+    sizes.push_back(gemm_sizes(1 << 14, 1 << 14, 1 << 14, 0.5, 0.5));
 
     for (auto size : sizes) {
         int m = size.m;
@@ -441,11 +400,7 @@ int main() {
         cudaMemcpy(out_cuda_, out_cuda, m * n * sizeof(scalar_t), cudaMemcpyDeviceToHost);
         auto maxdiff = -std::numeric_limits<float>::infinity();
         for (int i = 0; i < m * n; i++) {
-            // if (i < 10)
-
             auto diff = std::abs((float)out_cuda_[i] - (float)out_cuda_ref_[i]);
-            // if (i < 256+256+1)
-            // std::cout << (float)out_cuda_[i] << " " << (float)out_cuda_ref_[i] << " " << diff << "\n";
             maxdiff = std::max(maxdiff, diff);
         }
         std::cout << "maxdiff: " << maxdiff << std::endl;
