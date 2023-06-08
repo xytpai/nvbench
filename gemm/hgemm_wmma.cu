@@ -320,11 +320,7 @@ int main() {
         cudaMemcpy(out_cuda_, out_cuda, m * n * sizeof(scalar_t), cudaMemcpyDeviceToHost);
         auto maxdiff = -std::numeric_limits<float>::infinity();
         for (int i = 0; i < m * n; i++) {
-            // if (i < 10)
-
             auto diff = std::abs((float)out_cuda_[i] - (float)out_cuda_ref_[i]);
-            // if (i < 256+256+1)
-            // std::cout << (float)out_cuda_[i] << " " << (float)out_cuda_ref_[i] << " " << diff << "\n";
             maxdiff = std::max(maxdiff, diff);
         }
         std::cout << "maxdiff: " << maxdiff << std::endl;
