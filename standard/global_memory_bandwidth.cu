@@ -2,12 +2,8 @@
 #include <device_launch_parameters.h>
 #include <iostream>
 #include <random>
+#include "utils.h"
 using namespace std;
-
-template <typename T, int vec_size>
-struct alignas(sizeof(T) * vec_size) aligned_array {
-    T val[vec_size];
-};
 
 template <typename T, int vec_size>
 __global__ void threads_copy_kernel(const T *in, T *out, const size_t n) {

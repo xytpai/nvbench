@@ -5,7 +5,7 @@ This repo mainly focuses on evaluating the various capabilities of graphics card
 #### 1. global_memory_bandwidth
 
 ```bash
-nvcc standard/global_memory_bandwidth.cu ; ./a.out
+bash build.sh standard/global_memory_bandwidth.cu ; ./a.out
 ```
 
 | test/card(GBPS) | RTX4090  | A100-40GB |
@@ -19,7 +19,7 @@ nvcc standard/global_memory_bandwidth.cu ; ./a.out
 #### 2. single_precision_compute
 
 ```bash
-nvcc standard/single_precision_compute.cu ; ./a.out
+bash build.sh standard/single_precision_compute.cu ; ./a.out
 ```
 
 | Card | TFLOPS |

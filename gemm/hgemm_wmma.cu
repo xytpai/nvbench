@@ -6,11 +6,7 @@
 #include <assert.h>
 #include <mma.h>
 #include <cuda_fp16.h>
-
-template <typename scalar_t, int vec_size>
-struct alignas(sizeof(scalar_t) * vec_size) aligned_array {
-    scalar_t val[vec_size];
-};
+#include "utils.h"
 
 template <typename scalar_t,
           int BLOCK_M_LANES, int BLOCK_N_LANES,
@@ -314,16 +310,9 @@ int main() {
         double tflops = ((double)2 * m * n * k) / (timems / 1000) * 1e-12;
         std::cout << tflops << " tflops\n";
 
-        auto out_cuda_ref_ = new scalar_t[m * n];
-        auto out_cuda_ = new scalar_t[m * n];
-        cudaMemcpy(out_cuda_ref_, out_cuda_ref, m * n * sizeof(scalar_t), cudaMemcpyDeviceToHost);
-        cudaMemcpy(out_cuda_, out_cuda, m * n * sizeof(scalar_t), cudaMemcpyDeviceToHost);
-        auto maxdiff = -std::numeric_limits<float>::infinity();
-        for (int i = 0; i < m * n; i++) {
-            auto diff = std::abs((float)out_cuda_[i] - (float)out_cuda_ref_[i]);
-            maxdiff = std::max(maxdiff, diff);
-        }
-        std::cout << "maxdiff: " << maxdiff << std::endl;
+        using MaxDiff = CompareMaxdiff<scalar_t>;
+        auto diff = MaxDiff(out_cuda_ref, MaxDiff::CUDA, out_cuda, MaxDiff::CUDA, m * n);
+        std::cout << "maxdiff: " << diff() << std::endl;
 
         cudaFree(a_cuda);
         cudaFree(b_cuda);
@@ -334,8 +323,6 @@ int main() {
         delete[] a_cpu;
         delete[] b_cpu;
         delete[] out_cpu;
-        delete[] out_cuda_;
-        delete[] out_cuda_ref_;
     }
     return 0;
 }
