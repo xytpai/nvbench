@@ -59,8 +59,8 @@ float wmma_test() {
 }
 
 int main() {
-    constexpr int LOOP = 100000;
-    constexpr int num_blocks = 2048;
+    constexpr int LOOP = 1000000;
+    constexpr int num_blocks = 4096;
     constexpr int warps_per_block = 256 / 32;
     for (int i = 0; i < 3; i++) {
         auto timems = wmma_test<LOOP, num_blocks>();
