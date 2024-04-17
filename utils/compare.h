@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <iostream>
+#include <iomanip>
+#include <cmath>
 
 template <typename scalar_t>
 struct CompareMaxdiff {
@@ -49,3 +51,20 @@ struct CompareMaxdiff {
         return maxdiff;
     }
 };
+
+template <typename T>
+bool all_close(T *input, T *target, unsigned int len,
+               double atol = 1e-5, double rtol = 1e-5, int max_errors_print = 10) {
+    unsigned int errors = 0;
+    for (unsigned int i = 0; i < len; i++) {
+        if (std::isnan(input[i]) || (std::abs(input[i] - target[i]) > atol + rtol * std::abs(target[i]))) {
+            if (errors < max_errors_print)
+                std::cout << "Accuracy error: index[" << i << "], input: " << input[i] << ", target: " << target[i] << std::endl;
+            errors++;
+        }
+    }
+    bool is_error = errors != 0;
+    if (is_error)
+        std::cout << "Total " << errors << " errors\n";
+    return is_error;
+}
