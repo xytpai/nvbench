@@ -66,5 +66,5 @@ bool all_close(T *input, T *target, unsigned int len,
     bool is_error = errors != 0;
     if (is_error)
         std::cout << "Total " << errors << " errors\n";
-    return is_error;
+    return !is_error;
 }
