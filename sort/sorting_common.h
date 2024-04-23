@@ -8,7 +8,7 @@
 #define DEVICE_INLINE __device__ __forceinline__
 #define HOST_DEVICE_INLINE __host__ __device__ __forceinline__
 
-namespace sort_impl {
+namespace sorting_impl {
 
 struct NullType {
     using value_type = NullType;
@@ -249,4 +249,4 @@ DEVICE inline T block_inclusive_cumsum(T *slm_storage, const int lid) {
     return block_cumsum<T, COUNTER_LANES, THREADS, false>(slm_storage, lid);
 }
 
-} // namespace sort_impl
+} // namespace sorting_impl
