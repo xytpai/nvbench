@@ -556,8 +556,7 @@ public:
         }
         warp_exclusive_sum += warp_prefix_sum;
         warp_exclusive_sum += running_prefix;
-        if (lid_ == 0)
-            running_prefix += block_all_sum;
+        running_prefix += block_all_sum;
         // Write back
         int inclusive = partial_output[0];
         inclusive = warp_exclusive_sum + inclusive;
