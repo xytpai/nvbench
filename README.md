@@ -6,6 +6,8 @@ This repo mainly focuses on evaluating the various capabilities of graphics card
 
 ```bash
 bash build.sh standard/global_memory_bandwidth.cu ; ./a.out
+# gen ptx file
+bash build.sh standard/global_memory_bandwidth.cu -ptx ; cat ./a.out
 ```
 
 | test/card(GBPS) | RTX4090  | A100-40GB |
