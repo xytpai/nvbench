@@ -59,7 +59,7 @@ void test_threads_copy(size_t n) {
     cudaMemcpy(in_cuda, in_cpu, n * sizeof(float), cudaMemcpyHostToDevice);
 
     float timems;
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 300; i++)
         timems = threads_copy<float, vec_size>(in_cuda, out_cuda, n);
 
     float total_GBytes = (n + n) * sizeof(float) / 1000.0 / 1000.0;
