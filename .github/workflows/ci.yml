@@ -15,3 +15,18 @@ jobs:
       - name: Run lint check
         run: |
           find . \( -name "*.h" -o -name "*.cpp" -o -name "*.cu" \) -exec clang-format --dry-run -Werror {} +
+  CI:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-20.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: Jimver/cuda-toolkit@master
+        id: cuda-toolkit
+        with:
+          log-file-suffix: '${{matrix.os}}.txt'
+      - name: CUDA test
+        run: |
+          ls
+          nvcc --version
+          nvidia-smi
