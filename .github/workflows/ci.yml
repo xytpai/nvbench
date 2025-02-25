@@ -20,6 +20,6 @@ jobs:
     steps:
       - name: CUDA test
         run: |
-          ls
           nvcc --version
           nvidia-smi
+          bash build.sh standard/device_property.cu && ./a.out
