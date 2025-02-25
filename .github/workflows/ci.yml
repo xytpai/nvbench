@@ -20,7 +20,7 @@ jobs:
     steps:
       - name: CUDA test
         run: |
-          set -e
+          set -xe
           nvcc --version
           nvidia-smi
           git clone http://www.github.com/xytpai/nvbench && cd nvbench
