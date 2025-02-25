@@ -22,7 +22,7 @@ __global__ void threads_unroll_add_kernel(const T *in_dense, const T *in_bc, T *
 
 template <typename T, int vec_size>
 float threads_unroll_add(const T *in_dense, const T *in_bc, T *out, const size_t n,
-                              const size_t stride0, const size_t stride1) {
+                         const size_t stride0, const size_t stride1) {
     const int block_size = 1024;
     const int block_work_size = block_size * vec_size;
 

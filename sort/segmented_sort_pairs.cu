@@ -232,7 +232,8 @@ int main() {
         using value_t = int;
         int num_segments = randint_scalar(4, 20);
         int num_elements = randint_scalar(10, 140960);
-        if (it == 10) num_elements = 123;
+        if (it == 10)
+            num_elements = 123;
         else if (it == 11) {
             num_segments = 1;
             num_elements = 33554432; // 2**25
