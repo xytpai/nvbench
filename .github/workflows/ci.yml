@@ -14,5 +14,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Run lint check
         run: |
-          pip install lintrunner
-          lintrunner
+          clang-format --dry-run -Werror */*.h
+          clang-format --dry-run -Werror */*.cpp
+          clang-format --dry-run -Werror */*.cu
