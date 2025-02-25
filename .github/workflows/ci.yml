@@ -27,7 +27,7 @@ jobs:
           git clone http://www.github.com/xytpai/nvbench && cd nvbench
           bash build.sh standard/perf_broadcast_add.cu && ./a.out > log
           exit_label=0
-          if grep -qi "ok" filename; then
+          if grep -qi "ok" log; then
             exit_label=1
           fi
           cd .. && rm -rf nvbench
