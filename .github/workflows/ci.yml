@@ -22,4 +22,5 @@ jobs:
         run: |
           nvcc --version
           nvidia-smi
+          cd ../workspace/nvbench
           bash build.sh standard/device_property.cu && ./a.out
