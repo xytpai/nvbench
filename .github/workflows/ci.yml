@@ -26,4 +26,4 @@ jobs:
           bash build.sh standard/device_property.cu && ./a.out
           exit_label=$?
           cd .. && rm -rf nvbench
-          exit 2
+          exit exit ${exit_label}
