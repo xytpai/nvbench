@@ -59,5 +59,4 @@ int main() {
     PRINT_(fma_tflops)
 
     throw std::runtime_error("Negative values are not allowed!");
-    return 123;
 }
