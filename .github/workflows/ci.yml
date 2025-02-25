@@ -11,6 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout nvbench
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
       - name: Run lint check
-      - run: ls
+        run: ls
