@@ -13,4 +13,6 @@ jobs:
       - name: Checkout nvbench
         uses: actions/checkout@v4
       - name: Run lint check
-        run: lintrunner
+        run: |
+          pip install lintrunner
+          lintrunner
