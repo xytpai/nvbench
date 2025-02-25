@@ -1,0 +1,16 @@
+[[linter]]
+code = 'CLANGFORMAT'
+include_patterns = [
+    '*/*.cu',
+    '*/**/*.cu',
+    '*/*.h',
+    '*/**/*.h',
+    '*/*.cpp',
+    '*/**/*.cpp',
+]
+command = [
+    'clang-format',
+    '--dry-run',
+    '-Werror',
+    '@{{PATHSFILE}}',
+]
