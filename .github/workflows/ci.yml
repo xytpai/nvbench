@@ -25,8 +25,8 @@ jobs:
           nvidia-smi
           git clone http://www.github.com/xytpai/nvbench && cd nvbench
           bash build.sh standard/device_property.cu
-          ./a.out
-          echo $?
+          exit_label=$(./a.out 2>&1 > /dev/null)
+          echo ${exit_label}
           exit_label=$?
           cat log
           echo ${exit_label}
