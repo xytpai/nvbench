@@ -58,5 +58,5 @@ int main() {
     float fma_tflops = (2 * clock_freq_khz * cuda_cores) / 1e9f;
     PRINT_(fma_tflops)
 
-    throw std::runtime_error("Negative values are not allowed!");
+    return 123;
 }
