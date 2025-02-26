@@ -1,7 +1,6 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <iostream>
-#include <stdexcept>
 
 #define PRINT_PROP(PARAM) std::cout << #PARAM << ": " << prop.PARAM << std::endl;
 #define ENDL_ std::cout << std::endl;
@@ -57,6 +56,4 @@ int main() {
 
     float fma_tflops = (2 * clock_freq_khz * cuda_cores) / 1e9f;
     PRINT_(fma_tflops)
-
-    throw std::runtime_error("Negative values are not allowed!");
 }
