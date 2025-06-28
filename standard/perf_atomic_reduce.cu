@@ -3,24 +3,26 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
+namespace reduce_utils {
+
 template <typename T, int vec_size>
 struct alignas(sizeof(T) * vec_size) aligned_array {
     T val[vec_size];
 };
 
-template <typename T>
-__device__ T warp_reduce(T val) {
+template <typename T, typename func_t>
+__device__ T warp_reduce(T val, func_t fn) {
 #pragma unroll
     for (int offset = (32 >> 1); offset > 0; offset >>= 1) {
         // Warp Shuffle
-        val += __shfl_down_sync(0xffffffff, val, offset, 32);
+        val = fn(val, __shfl_down_sync(0xffffffff, val, offset, 32));
     }
     return val;
 }
 
-template <typename T>
-__device__ void block_reduce(T &val, T *shared) {
-    val = warp_reduce<T>(val);
+template <typename T, typename func_t>
+__device__ void block_reduce(T &val, T *shared, func_t fn) {
+    val = warp_reduce<T, func_t>(val, fn);
     auto warp_id = threadIdx.x / 32;
     auto warp_tid = threadIdx.x % 32;
     if (warp_id == 0) {
@@ -29,34 +31,38 @@ __device__ void block_reduce(T &val, T *shared) {
     __syncthreads();
     if (warp_id == 0 && warp_tid == 0) {
         for (int i = 1; i < blockDim.x / 32; ++i) {
-            val += shared[i];
+            val = fn(val, shared[i]);
         }
     }
 }
 
+template <typename T, int vec_size, typename func_t>
+__device__ T thread_reduce(T *block_start, int n, func_t fn, T ident) {
+    using vec_t = aligned_array<T, vec_size>;
+    T acc = ident;
+    for (int i = threadIdx.x * vec_size; i < n; i += blockDim.x * vec_size) {
+        auto input_vec = *reinterpret_cast<vec_t *>(&block_start[i]);
+        for (int j = 0; j < vec_size; ++j) {
+            acc = fn(acc, input_vec.val[j]);
+        }
+    }
+    return acc;
+}
+
+} // namespace reduce_utils
+
 template <typename T, int vec_size, int loops>
 __global__ void reduce_kernel(T *in_, T *out, size_t reduce_size) {
-    using vec_t = aligned_array<T, vec_size>;
-
     auto block_work_size = loops * blockDim.x * vec_size;
     auto block_offset = blockIdx.x * block_work_size;
     auto in = in_ + block_offset;
 
     __shared__ T shared[32];
-    T acc = 0;
 
-    auto remaining = reduce_size - block_offset;
-    remaining = remaining > block_work_size ? block_work_size : remaining;
-
-    // Thread Reduce
-    for (int i = threadIdx.x * vec_size; i < remaining; i += blockDim.x * vec_size) {
-        auto input_vec = *reinterpret_cast<vec_t *>(&in[i]);
-        for (int j = 0; j < vec_size; ++j) {
-            acc += input_vec.val[j];
-        }
-    }
-
-    block_reduce<T>(acc, shared);
+    auto remaining = ::min((int)(reduce_size - block_offset), block_work_size);
+    auto sum_fn = [](T a, T b) { return a + b; };
+    T acc = reduce_utils::thread_reduce<T, vec_size>(in, remaining, sum_fn, 0);
+    reduce_utils::block_reduce<T>(acc, shared, sum_fn);
 
     if (threadIdx.x == 0) {
         atomicAdd(out, acc);
