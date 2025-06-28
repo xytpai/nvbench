@@ -54,6 +54,8 @@ int main() {
         auto timems = fmad_test<LOOP, block_size, num_blocks>();
         auto tflops =
             2.0 * LOOP * LOOP * num_blocks * block_size / (timems / 1000) * 1e-12;
+        auto arithmetic_intensity = 2.0f * LOOP * LOOP / (sizeof(float) * 2);
+        std::cout << "arithmetic_intensity: " << arithmetic_intensity << " FLOP/Byte.  |  COMPUTE:";
         std::cout << tflops << " TFLOPS" << std::endl;
     }
     return 0;
