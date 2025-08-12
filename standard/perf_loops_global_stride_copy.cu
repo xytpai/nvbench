@@ -30,7 +30,7 @@ float threads_copy(const T *in, T *out, size_t n) {
     const int block_size = 256;
 
     dim3 threadsPerBlock(block_size);
-    const int nblocks = 128*6*64;
+    const int nblocks = 128 * 6 * 64;
     dim3 numBlocks(nblocks);
 
     cudaEvent_t start, stop;
